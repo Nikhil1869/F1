@@ -11,6 +11,9 @@ venv/
 .venv/
 env/
 
+# Environment secrets
+.env
+
 # FastF1 cache (large binary files)
 fastf1_cache/
 cache/

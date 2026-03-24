@@ -50,7 +50,7 @@ document.querySelectorAll(".tab-btn").forEach(function (btn) {
 
 function loadPart1() {
     showLoader();
-    fetchJSON("/api/part1/team-points")
+    fetchJSON("/api/data/team-points")
         .then(function (data) {
             var teamLabels = data.teams.map(function (t) { return t.TeamName; });
             var teamPoints = data.teams.map(function (t) { return t.Points; });
@@ -120,7 +120,7 @@ function loadPart2() {
     var d2 = getEl("selD2").value;
 
     showLoader();
-    fetchJSON("/api/part2/telemetry?d1=" + d1 + "&d2=" + d2)
+    fetchJSON("/api/data/telemetry?d1=" + d1 + "&d2=" + d2)
         .then(function (data) {
             var dist1 = data.tel1.distance;
             var dist2 = data.tel2.distance;
@@ -205,7 +205,7 @@ getEl("btnRunBaseline").addEventListener("click", function () {
     btn.textContent = "⏳ Training model...";
     showLoader();
 
-    fetchJSON("/api/part3/predict")
+    fetchJSON("/api/ml/predict")
         .then(function (data) {
             getEl("p3Accuracy").textContent   = (data.accuracy * 100).toFixed(1) + "%";
             getEl("p3Model").textContent      = data.model;
@@ -231,7 +231,7 @@ getEl("btnRunAdvanced").addEventListener("click", function () {
     btn.textContent = "⏳ Tuning hyperparameters...";
     showLoader();
 
-    fetchJSON("/api/part4/predict-advanced")
+    fetchJSON("/api/ml/predict-advanced")
         .then(function (data) {
             getEl("p4Accuracy").textContent   = (data.accuracy * 100).toFixed(1) + "%";
             getEl("p4Params").textContent     = JSON.stringify(data.bestParams);
@@ -320,7 +320,7 @@ function sendChat() {
     input.value = "";
     addChatMessage(msg, true);
 
-    fetchJSON("/api/part5/chat", {
+    fetchJSON("/api/chat/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg })

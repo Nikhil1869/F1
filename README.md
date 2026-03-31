@@ -1,6 +1,6 @@
-# F1 Data Lab
+# F1 Data Lab & Race Replay
 
-Interactive Formula 1 data analysis platform with telemetry visualization, ML-based podium predictions, and a chatbot-style race engineer.
+Interactive Formula 1 data analysis platform with telemetry visualization, ML-based podium predictions, a chatbot-style race engineer, and a fully interactive 2D race replay engine.
 
 ![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![Flask](https://img.shields.io/badge/flask-3.x-green.svg)
@@ -13,19 +13,30 @@ Interactive Formula 1 data analysis platform with telemetry visualization, ML-ba
 - **ML Podium Prediction (Baseline)** — Random Forest trained on season data to predict podium finishes
 - **ML Podium Prediction (Advanced)** — Adds cumulative driver form + hyperparameter tuning via GridSearchCV
 - **AI Race Engineer** — Chat interface to query race winners, fastest laps, and standings from historical data
+- **Interactive Race Replay** — 2D visualization of any race session with real-time driver positions, telemetry streaming, dynamic leaderboards, and safety car tracking
 
 ## Project structure
 
 ```
 f1/
-├── app.py                          # Flask backend (API routes + ML logic)
-├── config.py                       # Shared configuration
+├── app.py                          # Main Flask application entry point
+├── config.py                       # Shared configuration and environment settings
 ├── requirements.txt
+├── routes/                         # API Blueprints
+│   ├── data_routes.py              # Baseline data routes
+│   ├── ml_routes.py                # Machine learning prediction routes
+│   ├── chat_routes.py              # AI Race Engineer routes
+│   └── replay_routes.py            # Race replay and telemetry routes
 ├── templates/
-│   └── index.html                  # Single-page frontend
+│   ├── index.html                  # Main F1 Data Lab dashboard
+│   └── replay.html                 # Interactive Race Replay viewer
 ├── static/
-│   ├── css/style.css
-│   └── js/app.js
+│   ├── css/
+│   │   ├── style.css               # Main dashboard styling
+│   │   └── replay.css              # Replay engine styling
+│   └── js/
+│       ├── app.js                  # Main dashboard logic
+│       └── replay.js               # Replay rendering and playback logic
 ├── part_1_pandas/
 │   └── 01_f1_data_basics.py        # Standalone script — data loading & bar chart
 ├── part_2_fastf1/
@@ -36,7 +47,7 @@ f1/
 │   └── 04_ml_advanced.py           # Standalone script — tuned RF + feature engineering
 ├── part_5_ai_engineer/
 │   └── 05_ai_race_engineer.py      # Standalone script — chatbot skeleton
-└── output/                         # Generated plots from standalone scripts
+└── fastf1_cache/                   # Cached telemetry data (ignored in git)
 ```
 
 ## Getting started
@@ -49,8 +60,8 @@ f1/
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/f1-data-lab.git
-cd f1-data-lab
+git clone https://github.com/Nikhil1869/F1.git
+cd F1
 
 python -m venv venv
 
@@ -64,13 +75,15 @@ pip install -r requirements.txt
 
 ### Running the web app
 
+Create an `.env` file based on `.env.example` to unlock the AI Engineer functionalities.
+
 ```bash
 python app.py
 ```
 
-Open [http://localhost:5000](http://localhost:5000) in your browser.
+Open [http://localhost:5000](http://localhost:5000) in your browser. From there, you can explore the F1 Data Lab or launch the new **Race Replay** interface.
 
-> **Note:** The first load takes a minute or two while FastF1 downloads and caches session data. Subsequent loads are much faster.
+> **Note:** The first load of any race or qualifying session takes a minute or two while FastF1 downloads and caches the required telemetry data. Subsequent loads are significantly faster.
 
 ### Running the standalone scripts
 
@@ -84,16 +97,14 @@ python part_4_ml_advanced/04_ml_advanced.py
 python part_5_ai_engineer/05_ai_race_engineer.py
 ```
 
-Output plots are saved to `output/`.
-
 ## Tech stack
 
 | Layer     | Tools                                        |
 |-----------|----------------------------------------------|
 | Data      | [FastF1](https://github.com/theOehrly/Fast-F1), pandas, numpy |
 | ML        | scikit-learn (RandomForestClassifier, GridSearchCV) |
-| Backend   | Flask                                        |
-| Frontend  | Vanilla JS, Chart.js, CSS (dark theme)       |
+| Backend   | Flask (Blueprints)                           |
+| Frontend  | Vanilla JS, Chart.js, HTML5 Canvas, CSS      |
 | Plots     | matplotlib, seaborn (standalone scripts)     |
 
 ## API endpoints
@@ -105,10 +116,8 @@ Output plots are saved to `output/`.
 | GET    | `/api/part3/predict`        | Baseline ML predictions            |
 | GET    | `/api/part4/predict-advanced` | Advanced ML predictions          |
 | POST   | `/api/part5/chat`           | AI Race Engineer chat              |
-
-## Screenshots
-
-The web app lands on the Race Data tab and loads charts automatically. Switch tabs to explore telemetry overlays, run ML models, or chat with the AI engineer.
+| GET    | `/api/replay/sessions`      | List available replay sessions     |
+| GET    | `/api/replay/load`          | Load full race telemetry and track |
 
 ## License
 

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Race Replay | Live Track Visualization</title>
+    <meta name="description" content="Watch Formula 1 races unfold with real-time driver positions, safety car simulation, and live telemetry data.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/replay.css">
+</head>
+<body>
+        <div class="replay-topbar" id="replayTopbar">
+        <a href="/" class="topbar-back" id="backToLab">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            <span>F1 Data Lab</span>
+        </a>
+        <div class="topbar-title">
+            <span class="topbar-badge" id="sessionBadge">RACE REPLAY</span>
+            <h1 id="eventTitle">Loading Race Data...</h1>
+        </div>
+        <div class="topbar-meta">
+            <div class="meta-item" id="lapDisplay">
+                <span class="meta-label">LAP</span>
+                <span class="meta-value" id="currentLap">-/-</span>
+            </div>
+            <div class="meta-item" id="speedDisplay">
+                <span class="meta-label">SPEED</span>
+                <span class="meta-value" id="playbackSpeed">1.0x</span>
+            </div>
+        </div>
+    </div>
+
+        <div class="session-modal" id="sessionModal">
+        <div class="session-modal-content glass-card">
+            <h2>🏁 Select a Race</h2>
+            <p class="modal-sub">Choose a Grand Prix to replay</p>
+            <div class="session-controls">
+                <div class="year-selector">
+                    <label>Season:</label>
+                    <select id="yearSelect">
+                        <option value="2024" selected>2024</option>
+                        <option value="2023">2023</option>
+                        <option value="2022">2022</option>
+                    </select>
+                </div>
+            </div>
+            <div class="session-list" id="sessionList">
+                <div class="session-loading">
+                    <div class="spinner"></div>
+                    <p>Loading race calendar...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        <div class="replay-container" id="replayContainer" style="display:none;">
+        <div class="replay-layout">
+                        <aside class="leaderboard-panel" id="leaderboardPanel">
+                <div class="leaderboard-header">
+                    <h3>LIVE STANDINGS</h3>
+                    <span class="lb-hint">Click to select driver</span>
+                </div>
+                <div class="leaderboard-list" id="leaderboardList"></div>
+            </aside>
+
+                        <div class="track-area">
+                <canvas id="trackCanvas"></canvas>
+
+                                <div class="sc-banner" id="scBanner" style="display:none;">
+                    <div class="sc-icon">🟡</div>
+                    <span id="scText">SAFETY CAR</span>
+                </div>
+
+                                <div class="progress-bar-container" id="progressBarContainer">
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                        <div class="progress-thumb" id="progressThumb"></div>
+                    </div>
+                    <div class="progress-labels">
+                        <span id="progressLapStart">Lap 1</span>
+                        <span id="progressLapEnd">Lap -</span>
+                    </div>
+                </div>
+
+                                <div class="replay-controls" id="replayControls">
+                    <button class="ctrl-btn" id="btnRestart" title="Restart (R)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                        </svg>
+                    </button>
+                    <button class="ctrl-btn" id="btnRewind" title="Rewind (←)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/>
+                        </svg>
+                    </button>
+                    <button class="ctrl-btn ctrl-play" id="btnPlayPause" title="Play/Pause (Space)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" id="playIcon">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" id="pauseIcon" style="display:none;">
+                            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+                        </svg>
+                    </button>
+                    <button class="ctrl-btn" id="btnForward" title="Fast Forward (→)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/>
+                        </svg>
+                    </button>
+                    <button class="ctrl-btn" id="btnSpeed" title="Speed (↑/↓)">
+                        <span class="speed-label" id="speedLabel">1x</span>
+                    </button>
+                </div>
+            </div>
+
+                        <aside class="insights-panel" id="insightsPanel">
+                <div class="insights-header">
+                    <h3>DRIVER INSIGHTS</h3>
+                </div>
+                <div class="insights-content" id="insightsContent">
+                    <div class="insights-placeholder">
+                        <div class="placeholder-icon">🏎️</div>
+                        <p>Select a driver from the leaderboard to view telemetry</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+        <div class="legend-overlay" id="legendOverlay" style="display:none;">
+        <div class="legend-card glass-card">
+            <div class="legend-header">
+                <h3>Controls & Legend</h3>
+                <button class="legend-close" id="legendClose">✕</button>
+            </div>
+            <div class="legend-grid">
+                <div class="legend-section">
+                    <h4>Keyboard Shortcuts</h4>
+                    <div class="legend-item"><kbd>Space</kbd> <span>Pause / Resume</span></div>
+                    <div class="legend-item"><kbd>←</kbd> <span>Rewind 1 lap</span></div>
+                    <div class="legend-item"><kbd>→</kbd> <span>Forward 1 lap</span></div>
+                    <div class="legend-item"><kbd>↑</kbd> <span>Increase speed</span></div>
+                    <div class="legend-item"><kbd>↓</kbd> <span>Decrease speed</span></div>
+                    <div class="legend-item"><kbd>1-4</kbd> <span>Set speed directly</span></div>
+                    <div class="legend-item"><kbd>R</kbd> <span>Restart replay</span></div>
+                    <div class="legend-item"><kbd>D</kbd> <span>Toggle DRS zones</span></div>
+                    <div class="legend-item"><kbd>B</kbd> <span>Toggle progress bar</span></div>
+                    <div class="legend-item"><kbd>L</kbd> <span>Toggle driver names</span></div>
+                    <div class="legend-item"><kbd>H</kbd> <span>Show/hide this legend</span></div>
+                </div>
+                <div class="legend-section">
+                    <h4>Track Symbols</h4>
+                    <div class="legend-item"><span class="legend-dot driver-dot"></span> <span>Driver</span></div>
+                    <div class="legend-item"><span class="legend-dot sc-dot"></span> <span>Safety Car</span></div>
+                    <div class="legend-item"><span class="legend-dot drs-zone"></span> <span>DRS Zone</span></div>
+                </div>
+                <div class="legend-section">
+                    <h4>Tyre Compounds</h4>
+                    <div class="legend-item"><span class="legend-tyre" style="background:#FF3333"></span> <span>Soft</span></div>
+                    <div class="legend-item"><span class="legend-tyre" style="background:#FFC906"></span> <span>Medium</span></div>
+                    <div class="legend-item"><span class="legend-tyre" style="background:#EBEBEB"></span> <span>Hard</span></div>
+                    <div class="legend-item"><span class="legend-tyre" style="background:#39B54A"></span> <span>Intermediate</span></div>
+                    <div class="legend-item"><span class="legend-tyre" style="background:#00AEEF"></span> <span>Wet</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        <button class="legend-toggle" id="legendToggle" title="Show Legend (H)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+    </button>
+
+        <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p id="loadingText">Loading race data...</p>
+    </div>
+
+    <script src="/static/js/replay.js"></script>
+</body>
+</html>

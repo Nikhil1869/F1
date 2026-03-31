@@ -41,7 +41,6 @@ def load_season_results(year):
     df["Position"] = pd.to_numeric(df["Position"], errors="coerce").fillna(20)
     df["Points"]   = pd.to_numeric(df["Points"], errors="coerce").fillna(0)
 
-    # cumulative points before current race — proxy for recent form
     df["DriverForm"] = df.groupby("Abbreviation")["Points"].transform(
         lambda s: s.cumsum() - s
     )

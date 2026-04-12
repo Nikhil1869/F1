@@ -37,6 +37,8 @@
     var showDRS = true;
     var showProgressBar = true;
     var showDriverNames = true;
+    var hoveredDriver = null;
+    var showTelemetry = false;
     var selectedDrivers = new Set();
     var animationId = null;
     var lastTimestamp = 0;
@@ -166,6 +168,22 @@
         driverTargetPos = {};
 
         updateLeaderboard();
+
+        var driverSelect = document.getElementById("driverSelectorDropdown");
+        if (driverSelect) {
+            driverSelect.innerHTML = '<option value="">Driver...</option>';
+            Object.keys(raceData.drivers).sort().forEach(function(drv) {
+                driverSelect.innerHTML += '<option value="' + drv + '">' + drv + '</option>';
+            });
+        }
+
+        var lapSelect = document.getElementById("lapSelector");
+        if (lapSelect) {
+            lapSelect.innerHTML = '<option value="">Lap 1</option>';
+            for(var i=2; i<=raceData.totalLaps; i++) {
+                lapSelect.innerHTML += '<option value="' + i + '">Lap ' + i + '</option>';
+            }
+        }
 
         frameInterval = (raceData.dt || 0.5) * 1000;
 
@@ -329,7 +347,7 @@
             cp.y += (tp.y - cp.y) * lerpRate;
 
             var canvasPos = worldToCanvas(cp.x, cp.y);
-            var isSelected = selectedDrivers.has(drv);
+            var isSelected = selectedDrivers.has(drv) || hoveredDriver === drv;
             var isOut = dData.isOut || info.isRetired;
             var teamColor = info.teamColor || "#FFFFFF";
             var radius = isSelected ? 8 : 6;
@@ -374,6 +392,17 @@
                 var badge = dData.position === 1 ? "🥇" : dData.position === 2 ? "🥈" : "🥉";
                 ctx.font = "10px sans-serif";
                 ctx.fillText(badge, canvasPos.x + radius + 8, canvasPos.y + 4);
+            }
+
+            if (showTelemetry || isSelected) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+                ctx.fillRect(canvasPos.x + 10, canvasPos.y - 24, 60, 32);
+                ctx.fillStyle = "#fff";
+                ctx.font = "bold 9px 'JetBrains Mono', monospace";
+                ctx.textAlign = "left";
+                ctx.fillText((dData.speed || 0) + " km/h", canvasPos.x + 14, canvasPos.y - 12);
+                ctx.fillStyle = "#00e676";
+                ctx.fillText("G:" + (dData.gear || "-"), canvasPos.x + 14, canvasPos.y - 1);
             }
 
             ctx.globalAlpha = 1.0;
@@ -730,7 +759,63 @@
         document.getElementById("btnRewind").addEventListener("click", rewind);
         document.getElementById("btnForward").addEventListener("click", fastForward);
         document.getElementById("btnRestart").addEventListener("click", restart);
-        document.getElementById("btnSpeed").addEventListener("click", cycleSpeed);
+        
+        var speedBtns = document.querySelectorAll(".speed-btn");
+        if (speedBtns.length > 0) {
+            speedBtns.forEach(function(btn) {
+                btn.addEventListener("click", function() {
+                    speedBtns.forEach(function(b) { b.classList.remove("active"); });
+                    btn.classList.add("active");
+                    speed = parseFloat(btn.dataset.speed);
+                    speedIndex = speeds.indexOf(speed);
+                    if(speedIndex === -1) speedIndex = 1;
+                });
+            });
+        }
+
+        var tt = document.getElementById("telemetryToggle");
+        if (tt) {
+            tt.addEventListener("change", function(e) {
+                showTelemetry = e.target.checked;
+                renderFrame();
+            });
+        }
+
+        var dsd = document.getElementById("driverSelectorDropdown");
+        if (dsd) {
+            dsd.addEventListener("mouseover", function(e) {
+                if(e.target.tagName === 'OPTION' && e.target.value) { hoveredDriver = e.target.value; renderFrame(); }
+            });
+            dsd.addEventListener("mouseout", function() {
+                hoveredDriver = null; renderFrame();
+            });
+            dsd.addEventListener("change", function(e) {
+                if (e.target.value) {
+                    selectedDrivers.clear();
+                    selectedDrivers.add(e.target.value);
+                } else {
+                    selectedDrivers.clear();
+                }
+                updateLeaderboard();
+                updateInsights();
+                renderFrame();
+            });
+        }
+
+        var ls = document.getElementById("lapSelector");
+        if (ls) {
+            ls.addEventListener("change", function(e) {
+                var targetLap = parseInt(e.target.value);
+                if (isNaN(targetLap)) return;
+                var targetFrame = raceData.frames.findIndex(function(f) { return f.lap >= targetLap; });
+                if (targetFrame !== -1) {
+                    currentFrame = targetFrame;
+                    updateUI();
+                    renderFrame();
+                }
+            });
+        }
+
         document.getElementById("legendToggle").addEventListener("click", function () {
             legendOverlay.style.display = legendOverlay.style.display === "none" ? "flex" : "none";
         });

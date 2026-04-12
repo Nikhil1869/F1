@@ -915,3 +915,49 @@
         grid-template-columns: 1fr;
     }
 }
+
+.f1-select {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-glass);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-family: var(--font);
+    cursor: pointer;
+    outline: none;
+    transition: var(--transition);
+}
+
+.f1-select:hover, .f1-select:focus {
+    border-color: var(--f1-red);
+}
+
+.speed-toggle {
+    display: flex;
+    background: var(--bg-card);
+    border-radius: 4px;
+    border: 1px solid var(--border-glass);
+    overflow: hidden;
+}
+
+.speed-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.speed-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.speed-btn.active {
+    background: var(--f1-red);
+    color: #fff;
+}

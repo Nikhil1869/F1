@@ -87,7 +87,8 @@
                     </div>
                 </div>
 
-                                <div class="replay-controls" id="replayControls">
+                <!-- replay-controls -->
+                <div class="replay-controls" id="replayControls">
                     <button class="ctrl-btn" id="btnRestart" title="Restart (R)">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
@@ -111,9 +112,22 @@
                             <polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/>
                         </svg>
                     </button>
-                    <button class="ctrl-btn" id="btnSpeed" title="Speed (↑/↓)">
-                        <span class="speed-label" id="speedLabel">1x</span>
-                    </button>
+                    <select id="driverSelectorDropdown" class="f1-select" title="Highlight Driver">
+                        <option value="">Driver...</option>
+                    </select>
+                    <select id="lapSelector" class="f1-select" title="Jump to Lap">
+                        <option value="">Lap 1</option>
+                    </select>
+                    <div class="speed-toggle" id="speedToggleGroup">
+                        <button data-speed="0.5" class="speed-btn">.5x</button>
+                        <button data-speed="1.0" class="speed-btn active">1x</button>
+                        <button data-speed="2.0" class="speed-btn">2x</button>
+                        <button data-speed="4.0" class="speed-btn">4x</button>
+                    </div>
+                    <label class="toggle-switch" title="Telemetry Overlay" style="display:flex;align-items:center;gap:6px;cursor:pointer;color:rgba(255,255,255,0.7);font-size:0.8rem;text-transform:uppercase;">
+                        <input type="checkbox" id="telemetryToggle" style="accent-color: #e10600;">
+                        <span class="toggle-label">Telemetry</span>
+                    </label>
                 </div>
             </div>
 

@@ -1,16 +1,17 @@
 import os
+import xgboost as xgb
+import matplotlib.pyplot as plt
 import pandas as pd
 import fastf1
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 
 os.makedirs("fastf1_cache", exist_ok=True)
+os.makedirs("output", exist_ok=True)
 fastf1.Cache.enable_cache("fastf1_cache")
 
 RACE_LIMIT = 10
-
 
 def load_season_results(year):
     schedule = fastf1.get_event_schedule(year)
@@ -42,15 +43,47 @@ def load_season_results(year):
     df["Podium"] = (df["Position"] <= 3).astype(int)
     return df
 
+def train_and_evaluate(X, y, feature_names):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    print("\nTraining XGBoost Model...")
+    clf = xgb.XGBClassifier(
+        n_estimators=100, 
+        max_depth=5, 
+        learning_rate=0.1, 
+        random_state=42, 
+        use_label_encoder=False, 
+        eval_metric='logloss'
+    )
+    clf.fit(X_train, y_train)
+
+    probabilities = clf.predict_proba(X_test)
+    preds = clf.predict(X_test)
+    print(f"Accuracy: {accuracy_score(y_test, preds):.4f}")
+    if len(preds) > 0:
+        print(f"Prediction: {preds[0]}, Confidence: {probabilities[0].max() * 100:.2f}%")
+
+    importance_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Importance': clf.feature_importances_
+    }).sort_values(by='Importance', ascending=False)
+
+    plt.figure(figsize=(8, 6))
+    plt.barh(importance_df['Feature'], importance_df['Importance'], color='#e10600')
+    plt.gca().invert_yaxis()
+    plt.title('XGBoost Feature Importance - Podium Predictor')
+    plt.xlabel('Gain Score')
+    plt.tight_layout()
+    plt.savefig('output/feature_importance.png')
+    print("Feature importance plot saved to output/feature_importance.png")
+
+    return clf
 
 def main():
     df = load_season_results(2023)
     if df.empty:
         print("Failed to load any race data.")
         return
-
-    print("Dataset sample:")
-    print(df.head())
 
     le_team   = LabelEncoder()
     le_driver = LabelEncoder()
@@ -64,16 +97,8 @@ def main():
     X = df[features]
     y = df["Podium"]
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    print("\nTraining Random Forest...")
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X_train, y_train)
-
-    preds = clf.predict(X_test)
-    print("Accuracy:", accuracy_score(y_test, preds))
-    print("\n" + classification_report(y_test, preds))
-
+    clf = train_and_evaluate(X, y, features)
+    
     try:
         sample = [[
             1.0,
@@ -82,7 +107,7 @@ def main():
             le_event.transform([df["EventName"].iloc[0]])[0],
         ]]
         prob = clf.predict_proba(sample)[0]
-        print(f"VER from P1 podium probability: {prob[1]:.2f}")
+        print(f"\nVER from P1 podium probability: {prob[1]*100:.2f}%")
     except ValueError:
         pass
 

@@ -3,8 +3,8 @@ import warnings
 import fastf1
 import numpy as np
 import pandas as pd
+import xgboost as xgb
 from flask import Blueprint, jsonify
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
@@ -81,7 +81,7 @@ def _predict_all_drivers(df, model, le_team, le_driver, le_event, include_form=F
                 entry["form"] = round(float(form), 1)
 
             proba = model.predict_proba([row])[0]
-            entry["podiumProb"] = round(proba[1] if len(proba) > 1 else 0, 3)
+            entry["podiumProb"] = float(round(proba[1] if len(proba) > 1 else 0, 3))
             predictions.append(entry)
         except (ValueError, IndexError):
             continue
@@ -113,18 +113,25 @@ def predict():
             X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
         )
 
-        clf = RandomForestClassifier(n_estimators=100, random_state=RANDOM_STATE)
+        clf = xgb.XGBClassifier(
+            n_estimators=100, 
+            max_depth=5, 
+            learning_rate=0.1, 
+            random_state=RANDOM_STATE, 
+            use_label_encoder=False, 
+            eval_metric='logloss'
+        )
         clf.fit(X_train, y_train)
 
         acc = accuracy_score(y_test, clf.predict(X_test))
-        importances = dict(zip(feature_cols, clf.feature_importances_.tolist()))
+        importances = dict(zip(feature_cols, [float(v) for v in clf.feature_importances_]))
         predictions = _predict_all_drivers(df, clf, le_team, le_driver, le_event)
 
         return jsonify({
             "accuracy": round(acc, 4),
             "featureImportances": importances,
             "predictions": predictions[:10],
-            "model": "RandomForest (baseline)",
+            "model": "XGBoost (baseline)",
             "dataPoints": len(df),
         })
     except Exception as exc:
@@ -159,19 +166,19 @@ def predict_advanced():
         )
 
         param_grid = {
-            "n_estimators": [50, 100, 200],
-            "max_depth": [None, 5, 10],
-            "min_samples_split": [2, 5],
+            "n_estimators": [50, 100],
+            "max_depth": [3, 5],
+            "learning_rate": [0.05, 0.1]
         }
         grid = GridSearchCV(
-            RandomForestClassifier(random_state=RANDOM_STATE),
+            xgb.XGBClassifier(random_state=RANDOM_STATE, use_label_encoder=False, eval_metric='logloss'),
             param_grid, cv=3, n_jobs=-1, scoring="accuracy",
         )
         grid.fit(X_train, y_train)
 
         best = grid.best_estimator_
         acc = accuracy_score(y_test, best.predict(X_test))
-        importances = dict(zip(feature_cols, best.feature_importances_.tolist()))
+        importances = dict(zip(feature_cols, [float(v) for v in best.feature_importances_]))
 
         predictions = _predict_all_drivers(
             df, best, le_team, le_driver, le_event, include_form=True
@@ -182,7 +189,7 @@ def predict_advanced():
             "bestParams": grid.best_params_,
             "featureImportances": importances,
             "predictions": predictions[:10],
-            "model": "RandomForest (tuned + DriverForm)",
+            "model": "XGBoost (tuned + DriverForm)",
             "dataPoints": len(df),
         })
     except Exception as exc:

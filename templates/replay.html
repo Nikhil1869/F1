@@ -7,9 +7,11 @@
     <meta name="description" content="Watch Formula 1 races unfold with real-time driver positions, safety car simulation, and live telemetry data.">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700;900&family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/replay.css">
+    <script type="module" src="https://cdn.skypack.dev/@hotwired/turbo"></script>
 </head>
 <body>
         <div class="replay-topbar" id="replayTopbar">
@@ -69,6 +71,29 @@
             </aside>
 
                         <div class="track-area">
+                <div class="session-banner" id="sessionBanner" style="display:none;">
+                    <div class="session-banner-left">
+                        <div class="banner-country" id="bannerCountry">Country</div>
+                        <div class="banner-event" id="bannerEvent">Event Name</div>
+                    </div>
+                    <div class="session-banner-right">
+                        <div class="banner-stat"><span class="banner-label">YEAR</span><span class="banner-val" id="bannerYear">2024</span></div>
+                        <div class="banner-stat"><span class="banner-label">DATE</span><span class="banner-val" id="bannerDate">YYYY-MM-DD</span></div>
+                        <div class="banner-stat"><span class="banner-label">LENGTH</span><span class="banner-val" id="bannerLength">5.00 km</span></div>
+                    </div>
+                </div>
+                
+                <div class="weather-widget" id="weatherWidget" style="display:none;">
+                    <div class="weather-header">WEATHER</div>
+                    <div class="weather-grid">
+                        <div class="w-item" title="Air Temp"><span class="w-icon">🌡️</span><span id="wAir">--°C</span></div>
+                        <div class="w-item" title="Track Temp"><span class="w-icon">🛣️</span><span id="wTrack">--°C</span></div>
+                        <div class="w-item" title="Humidity"><span class="w-icon">💧</span><span id="wHum">--%</span></div>
+                        <div class="w-item" title="Wind"><span class="w-icon">💨</span><span id="wWind">-- km/h</span> <span id="wWindDir" style="display:inline-block; transition: transform 0.3s;">↑</span></div>
+                        <div class="w-item" title="Rainfall"><span class="w-icon">🌧️</span><span id="wRain">No</span></div>
+                    </div>
+                </div>
+
                 <canvas id="trackCanvas"></canvas>
 
                                 <div class="sc-banner" id="scBanner" style="display:none;">
@@ -141,6 +166,12 @@
                         <p>Select a driver from the leaderboard to view telemetry</p>
                     </div>
                 </div>
+                <div class="race-control-header">
+                    <h3>RACE CONTROL</h3>
+                </div>
+                <div class="race-control-feed" id="raceControlFeed">
+                    <div class="rc-placeholder">Waiting for messages...</div>
+                </div>
             </aside>
         </div>
     </div>
@@ -195,6 +226,7 @@
         <p id="loadingText">Loading race data...</p>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="/static/js/replay.js"></script>
 </body>
 </html>

@@ -44,6 +44,7 @@
     var lastTimestamp = 0;
     var frameAccumulator = 0;
     var frameInterval = 500; 
+    var telemetryChart = null;
 
     var trackBounds = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
     var trackScale = 1;
@@ -55,6 +56,8 @@
     var driverCurrentPos = {};
     var driverTargetPos = {};
 
+    var worker = null;
+
     var TYRE_COLORS = {
         SOFT: "#FF3333",
         MEDIUM: "#FFC906",
@@ -65,9 +68,18 @@
     };
 
     function init() {
+        if (!worker && window.Worker && canvas.transferControlToOffscreen) {
+            worker = new Worker("/static/js/replay_worker.js");
+            var offscreen = canvas.transferControlToOffscreen();
+            worker.postMessage({ type: "init", canvas: offscreen }, [offscreen]);
+        }
         loadSessions(yearSelect.value);
         yearSelect.addEventListener("change", function () {
-            loadSessions(yearSelect.value);
+            var context = this, args = arguments;
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(function() {
+                loadSessions(yearSelect.value);
+            }, 300);
         });
         setupControls();
         setupKeyboard();
@@ -167,6 +179,31 @@
         driverCurrentPos = {};
         driverTargetPos = {};
 
+        if (worker) {
+            worker.postMessage({ type: "init_data", raceData: raceData });
+        }
+
+        // Setup Session Banner
+        if (raceData.sessionInfo) {
+            document.getElementById("sessionBanner").style.display = "flex";
+            document.getElementById("bannerCountry").textContent = raceData.sessionInfo.country || "";
+            document.getElementById("bannerEvent").textContent = raceData.sessionInfo.eventName || "";
+            document.getElementById("bannerYear").textContent = raceData.sessionInfo.year || "";
+            let d = raceData.sessionInfo.date;
+            document.getElementById("bannerDate").textContent = d ? d.split(" ")[0] : "";
+            document.getElementById("bannerLength").textContent = ((raceData.sessionInfo.circuitLength || 0) / 1000).toFixed(2) + " km";
+        }
+        
+        // Setup Weather Widget
+        if (raceData.frames && raceData.frames.length > 0 && raceData.frames[0].weather) {
+            document.getElementById("weatherWidget").style.display = "block";
+        } else {
+            document.getElementById("weatherWidget").style.display = "none";
+        }
+        
+        // Clear Race Control Feed
+        document.getElementById("raceControlFeed").innerHTML = '<div class="rc-placeholder">Waiting for messages...</div>';
+
         updateLeaderboard();
 
         var driverSelect = document.getElementById("driverSelectorDropdown");
@@ -210,13 +247,16 @@
         canvasH = rect.height - 100; 
         if (canvasH < 200) canvasH = 200;
 
-        canvas.width = canvasW * dpr;
-        canvas.height = canvasH * dpr;
-        canvas.style.width = canvasW + "px";
-        canvas.style.height = canvasH + "px";
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        updateTrackTransform();
+        if (worker) {
+            worker.postMessage({ type: "resize", w: canvasW, h: canvasH, dpr: dpr });
+        } else {
+            canvas.width = canvasW * dpr;
+            canvas.height = canvasH * dpr;
+            canvas.style.width = canvasW + "px";
+            canvas.style.height = canvasH + "px";
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            updateTrackTransform();
+        }
 
         if (raceData) renderFrame();
     }
@@ -242,229 +282,21 @@
     }
 
     function renderFrame() {
-        ctx.clearRect(0, 0, canvasW, canvasH);
-
-        var bgGrad = ctx.createRadialGradient(canvasW / 2, canvasH / 2, 0, canvasW / 2, canvasH / 2, canvasW * 0.6);
-        bgGrad.addColorStop(0, "#12121c");
-        bgGrad.addColorStop(1, "#0a0a0f");
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, canvasW, canvasH);
-
-        if (!raceData || !raceData.track || raceData.track.length === 0) {
-            ctx.fillStyle = "#555";
-            ctx.font = "16px 'Outfit', sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("No track data available", canvasW / 2, canvasH / 2);
-            return;
+        if (worker) {
+            worker.postMessage({
+                type: "render",
+                frame: currentFrame,
+                selectedDrivers: Array.from(selectedDrivers),
+                hoveredDriver: hoveredDriver,
+                showDRS: showDRS,
+                showDriverNames: showDriverNames,
+                showTelemetry: showTelemetry
+            });
         }
-
-        drawTrack();
-        drawDrivers();
-        drawSafetyCar();
-    }
-
-    function drawTrack() {
-        var track = raceData.track;
-        if (track.length < 2) return;
-
-        ctx.beginPath();
-        var p0 = worldToCanvas(track[0][0], track[0][1]);
-        ctx.moveTo(p0.x, p0.y);
-        for (var i = 1; i < track.length; i++) {
-            var p = worldToCanvas(track[i][0], track[i][1]);
-            ctx.lineTo(p.x, p.y);
-        }
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-        ctx.lineWidth = 14;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        for (var i = 1; i < track.length; i++) {
-            var p = worldToCanvas(track[i][0], track[i][1]);
-            ctx.lineTo(p.x, p.y);
-        }
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
-        ctx.lineWidth = 6;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        for (var i = 1; i < track.length; i++) {
-            var p = worldToCanvas(track[i][0], track[i][1]);
-            ctx.lineTo(p.x, p.y);
-        }
-        ctx.strokeStyle = "rgba(225, 6, 0, 0.12)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        var sfP = worldToCanvas(track[0][0], track[0][1]);
-        ctx.beginPath();
-        ctx.arc(sfP.x, sfP.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(225, 6, 0, 0.3)";
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(sfP.x, sfP.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = "#e10600";
-        ctx.fill();
-    }
-
-    function drawDrivers() {
-        if (!raceData.frames || currentFrame >= raceData.frames.length) return;
-
-        var frame = raceData.frames[currentFrame];
-        if (!frame || !frame.drivers) return;
-
-        var driverKeys = Object.keys(frame.drivers);
-
-        driverKeys.sort(function (a, b) {
-            var pa = frame.drivers[a].position || 99;
-            var pb = frame.drivers[b].position || 99;
-            return pb - pa;
-        });
-
-        for (var i = 0; i < driverKeys.length; i++) {
-            var drv = driverKeys[i];
-            var dData = frame.drivers[drv];
-            var info = raceData.drivers[drv];
-            if (!info) continue;
-
-            var targetX = dData.x;
-            var targetY = dData.y;
-            if (targetX === undefined || targetY === undefined) continue;
-
-            if (!driverCurrentPos[drv]) {
-                driverCurrentPos[drv] = { x: targetX, y: targetY };
-            }
-            driverTargetPos[drv] = { x: targetX, y: targetY };
-
-            var cp = driverCurrentPos[drv];
-            var tp = driverTargetPos[drv];
-            var lerpRate = 0.15;
-            cp.x += (tp.x - cp.x) * lerpRate;
-            cp.y += (tp.y - cp.y) * lerpRate;
-
-            var canvasPos = worldToCanvas(cp.x, cp.y);
-            var isSelected = selectedDrivers.has(drv) || hoveredDriver === drv;
-            var isOut = dData.isOut || info.isRetired;
-            var teamColor = info.teamColor || "#FFFFFF";
-            var radius = isSelected ? 8 : 6;
-
-            if (isOut) {
-
-                ctx.globalAlpha = 0.3;
-            }
-
-            if (isSelected) {
-                ctx.beginPath();
-                ctx.arc(canvasPos.x, canvasPos.y, 18, 0, Math.PI * 2);
-                ctx.fillStyle = teamColor.replace(")", ", 0.2)").replace("rgb", "rgba");
-                try {
-                    var grd = ctx.createRadialGradient(canvasPos.x, canvasPos.y, 0, canvasPos.x, canvasPos.y, 18);
-                    grd.addColorStop(0, teamColor + "44");
-                    grd.addColorStop(1, "transparent");
-                    ctx.fillStyle = grd;
-                } catch (e) {}
-                ctx.fill();
-            }
-
-            ctx.beginPath();
-            ctx.arc(canvasPos.x, canvasPos.y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = teamColor;
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.arc(canvasPos.x, canvasPos.y, radius + 2, 0, Math.PI * 2);
-            ctx.strokeStyle = isSelected ? "#fff" : "rgba(255,255,255,0.3)";
-            ctx.lineWidth = isSelected ? 2 : 1;
-            ctx.stroke();
-
-            if (showDriverNames || isSelected) {
-                ctx.font = (isSelected ? "bold " : "") + "10px 'Outfit', sans-serif";
-                ctx.textAlign = "center";
-                ctx.fillStyle = isSelected ? "#fff" : "rgba(255,255,255,0.7)";
-                ctx.fillText(drv, canvasPos.x, canvasPos.y - radius - 6);
-            }
-
-            if (dData.position && dData.position <= 3) {
-                var badge = dData.position === 1 ? "🥇" : dData.position === 2 ? "🥈" : "🥉";
-                ctx.font = "10px sans-serif";
-                ctx.fillText(badge, canvasPos.x + radius + 8, canvasPos.y + 4);
-            }
-
-            if (showTelemetry || isSelected) {
-                ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-                ctx.fillRect(canvasPos.x + 10, canvasPos.y - 24, 60, 32);
-                ctx.fillStyle = "#fff";
-                ctx.font = "bold 9px 'JetBrains Mono', monospace";
-                ctx.textAlign = "left";
-                ctx.fillText((dData.speed || 0) + " km/h", canvasPos.x + 14, canvasPos.y - 12);
-                ctx.fillStyle = "#00e676";
-                ctx.fillText("G:" + (dData.gear || "-"), canvasPos.x + 14, canvasPos.y - 1);
-            }
-
-            ctx.globalAlpha = 1.0;
-        }
-    }
-
-    function drawSafetyCar() {
-        if (!raceData.frames || currentFrame >= raceData.frames.length) return;
-
-        var frame = raceData.frames[currentFrame];
-        var sc = frame.safety_car;
-
-        if (!sc) {
-            scBanner.style.display = "none";
-            return;
-        }
-
-        scBanner.style.display = "flex";
-        if (sc.phase === "deploying") {
-            scText.textContent = "SC DEPLOYING";
-        } else if (sc.phase === "returning") {
-            scText.textContent = "SC IN";
-        } else {
-            scText.textContent = "SAFETY CAR";
-        }
-
-        var pos = worldToCanvas(sc.x, sc.y);
-        var alpha = sc.alpha || 1.0;
-
-        ctx.globalAlpha = alpha;
-
-        var scGlowRadius = 20 + Math.sin(Date.now() / 300) * 5;
-        var scGrad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, scGlowRadius);
-        scGrad.addColorStop(0, "rgba(255, 165, 0, 0.3)");
-        scGrad.addColorStop(1, "transparent");
-        ctx.fillStyle = scGrad;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, scGlowRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = "#FFA500";
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 11, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 165, 0, 0.7)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.font = "bold 11px 'Outfit', sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillStyle = "#FFA500";
-        ctx.fillText("SC", pos.x, pos.y - 16);
-
-        ctx.globalAlpha = 1.0;
     }
 
     function updateLeaderboard() {
         if (!raceData || !raceData.frames || currentFrame >= raceData.frames.length) return;
-
         var frame = raceData.frames[currentFrame];
         if (!frame || !frame.drivers) return;
 
@@ -478,6 +310,7 @@
                 team: info.team || "Unknown",
                 teamColor: info.teamColor || "#FFF",
                 compound: frameData.compound || "UNKNOWN",
+                tyreLife: frameData.tyreLife || 0,
                 isOut: frameData.isOut || info.isRetired || false,
                 speed: frameData.speed || 0,
                 gear: frameData.gear || 0,
@@ -504,7 +337,10 @@
                         '<div class="lb-name">' + e.abbr + '</div>' +
                         '<div class="lb-team">' + e.team + '</div>' +
                     '</div>' +
-                    '<div class="lb-tyre" style="background:' + tyreColor + '" title="' + e.compound + '"></div>' +
+                    '<div class="lb-tyre-info" style="display:flex; flex-direction:column; align-items:center; min-width: 25px;">' +
+                        '<div class="lb-tyre" style="background:' + tyreColor + '; margin-bottom: 2px;" title="' + e.compound + '"></div>' +
+                        '<div class="lb-tyre-life" style="font-size: 0.65rem; color: #888; font-family: \'JetBrains Mono\', monospace;" title="Tyre Life Laps">L' + e.tyreLife + '</div>' +
+                    '</div>' +
                     (e.isOut ? '<span class="lb-out-badge">OUT</span>' : '') +
                 '</div>';
         }
@@ -537,83 +373,197 @@
         });
     }
 
+    var lastInsightDrivers = "";
+
     function updateInsights() {
+        var currentDriversStr = Array.from(selectedDrivers).sort().join(",");
+        var isDOMStructureSame = (lastInsightDrivers === currentDriversStr) && (currentDriversStr !== "");
+
         if (selectedDrivers.size === 0) {
-            insightsContent.innerHTML =
-                '<div class="insights-placeholder">' +
-                    '<div class="placeholder-icon">🏎️</div>' +
-                    '<p>Select a driver from the leaderboard to view telemetry</p>' +
-                '</div>';
+            if (lastInsightDrivers !== "") {
+                insightsContent.innerHTML =
+                    '<div class="insights-placeholder">' +
+                        '<div class="placeholder-icon">🏎️</div>' +
+                        '<p>Select a driver from the leaderboard to view telemetry</p>' +
+                    '</div>';
+                lastInsightDrivers = "";
+                if (telemetryChart) {
+                    telemetryChart.destroy();
+                    telemetryChart = null;
+                }
+            }
             return;
         }
 
         var frame = raceData.frames[currentFrame];
-        var html = "";
 
+        // Only rebuild HTML if the selected drivers have changed
+        if (!isDOMStructureSame) {
+            var html = "";
+            selectedDrivers.forEach(function (drv) {
+                var info = raceData.drivers[drv];
+                if (!info) return;
+
+                html +=
+                    '<div class="insight-driver-card" data-driver="' + drv + '">' +
+                        '<div class="insight-driver-header">' +
+                            '<div class="insight-team-color" style="background:' + (info.teamColor || '#fff') + '"></div>' +
+                            '<div>' +
+                                '<div class="insight-driver-name">' + drv + '</div>' +
+                                '<div class="insight-driver-team">' + (info.team || "") + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="insight-stats">' +
+                            '<div class="insight-stat">' +
+                                '<div class="insight-stat-label">Speed</div>' +
+                                '<div class="insight-stat-value js-speed-val"><span class="val">—</span><small> km/h</small></div>' +
+                            '</div>' +
+                            '<div class="insight-stat">' +
+                                '<div class="insight-stat-label">Gear</div>' +
+                                '<div class="insight-stat-value js-gear-val">—</div>' +
+                            '</div>' +
+                            '<div class="insight-stat">' +
+                                '<div class="insight-stat-label">DRS</div>' +
+                                '<div class="insight-stat-value js-drs-val">CLOSED</div>' +
+                            '</div>' +
+                        '</div>' +
+                        ((selectedDrivers.size === 1) ? 
+                        '<div class="insight-chart-container" style="margin-top:10px; height:200px; position:relative;"><canvas id="telemetryChartCanvas"></canvas></div>' : 
+                        '<div class="insight-telemetry-bars">' +
+                            '<div class="telemetry-bar-wrapper">' +
+                                '<div class="telemetry-bar-label">THR</div>' +
+                                '<div class="telemetry-bar-bg"><div class="telemetry-bar-fill js-throttle-fill" style="width:0%;"></div></div>' +
+                            '</div>' +
+                            '<div class="telemetry-bar-wrapper">' +
+                                '<div class="telemetry-bar-label">BRK</div>' +
+                                '<div class="telemetry-bar-bg"><div class="telemetry-bar-fill js-brake-fill" style="width:0%;"></div></div>' +
+                            '</div>' +
+                        '</div>') +
+                        '<div class="insight-telemetry js-tyre-info">' +
+                            '<h4 class="js-tyre-h4">TYRE: UNKNOWN</h4>' +
+                            '<div style="display:flex;align-items:center;gap:8px;">' +
+                                '<div class="lb-tyre js-tyre-color" style="background:var(--text-secondary);width:18px;height:18px;"></div>' +
+                                '<span class="js-tyre-span" style="font-size:0.8rem;color:var(--text-secondary);">UNKNOWN | Health: 100%</span>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+            });
+            insightsContent.innerHTML = html;
+            lastInsightDrivers = currentDriversStr;
+
+            if (telemetryChart) {
+                telemetryChart.destroy();
+                telemetryChart = null;
+            }
+        }
+
+        // Efficiently update values inside existing DOM nodes
         selectedDrivers.forEach(function (drv) {
-            var info = raceData.drivers[drv];
             var data = frame ? frame.drivers[drv] : null;
-            if (!info) return;
+            var card = insightsContent.querySelector('.insight-driver-card[data-driver="' + drv + '"]');
+            if (!data || !card) return;
 
-            var speedVal = data && data.speed !== undefined ? Math.round(data.speed) : "—";
-            var gearVal = data && data.gear !== undefined ? data.gear : "—";
-            var drsVal = data && data.drs !== undefined ? data.drs : 0;
-            var throttleVal = data && data.throttle !== undefined ? data.throttle : 0;
-            var brakeVal = data && data.brake !== undefined ? data.brake : 0;
+            var speedVal = data.speed !== undefined ? Math.round(data.speed) : "—";
+            var gearVal = data.gear !== undefined ? data.gear : "—";
+            var drsVal = data.drs !== undefined ? data.drs : 0;
+            var throttleVal = data.throttle !== undefined ? data.throttle : 0;
+            var brakeVal = data.brake !== undefined ? data.brake : 0;
 
             var drsLabel = drsVal > 8 ? "OPEN" : "CLOSED"; 
             var drsClass = drsVal > 8 ? "drs-active" : "drs-inactive";
-            var compound = data ? (data.compound || "UNKNOWN") : "UNKNOWN";
-            var lapNum = data ? (data.lapNumber || "—") : "—";
+            var compound = data.compound || "UNKNOWN";
+            var tyreHealth = data.tyreHealth || 100;
             var tyreColor = TYRE_COLORS[compound] || TYRE_COLORS.UNKNOWN;
 
             var throttlePct = Math.min(100, Math.max(0, throttleVal));
             var brakePct = Math.min(100, Math.max(0, brakeVal));
 
-            html +=
-                '<div class="insight-driver-card">' +
-                    '<div class="insight-driver-header">' +
-                        '<div class="insight-team-color" style="background:' + (info.teamColor || '#fff') + '"></div>' +
-                        '<div>' +
-                            '<div class="insight-driver-name">' + drv + '</div>' +
-                            '<div class="insight-driver-team">' + (info.team || "") + '</div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="insight-stats">' +
-                        '<div class="insight-stat">' +
-                            '<div class="insight-stat-label">Speed</div>' +
-                            '<div class="insight-stat-value speed-val">' + speedVal + '<small> km/h</small></div>' +
-                        '</div>' +
-                        '<div class="insight-stat">' +
-                            '<div class="insight-stat-label">Gear</div>' +
-                            '<div class="insight-stat-value gear-val">' + gearVal + '</div>' +
-                        '</div>' +
-                        '<div class="insight-stat">' +
-                            '<div class="insight-stat-label">DRS</div>' +
-                            '<div class="insight-stat-value ' + drsClass + '">' + drsLabel + '</div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="insight-telemetry-bars">' +
-                        '<div class="telemetry-bar-wrapper">' +
-                            '<div class="telemetry-bar-label">THR</div>' +
-                            '<div class="telemetry-bar-bg"><div class="telemetry-bar-fill throttle-fill" style="width:' + throttlePct + '%;"></div></div>' +
-                        '</div>' +
-                        '<div class="telemetry-bar-wrapper">' +
-                            '<div class="telemetry-bar-label">BRK</div>' +
-                            '<div class="telemetry-bar-bg"><div class="telemetry-bar-fill brake-fill" style="width:' + brakePct + '%;"></div></div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="insight-telemetry">' +
-                        '<h4>TYRE: ' + compound + '</h4>' +
-                        '<div style="display:flex;align-items:center;gap:8px;">' +
-                            '<div class="lb-tyre" style="background:' + tyreColor + ';width:18px;height:18px;"></div>' +
-                            '<span style="font-size:0.8rem;color:var(--text-secondary);">' + compound + '</span>' +
-                        '</div>' +
-                    '</div>' +
-                '</div>';
+            card.querySelector('.js-speed-val .val').textContent = speedVal;
+            card.querySelector('.js-gear-val').textContent = gearVal;
+            
+            var drsEl = card.querySelector('.js-drs-val');
+            drsEl.textContent = drsLabel;
+            drsEl.className = 'insight-stat-value js-drs-val ' + drsClass;
+
+            if (selectedDrivers.size > 1) {
+                card.querySelector('.js-throttle-fill').style.width = throttlePct + '%';
+                card.querySelector('.js-brake-fill').style.width = brakePct + '%';
+            }
+
+            card.querySelector('.js-tyre-h4').textContent = 'TYRE: ' + compound;
+            card.querySelector('.js-tyre-color').style.background = tyreColor;
+            card.querySelector('.js-tyre-span').textContent = compound + ' | Health: ' + tyreHealth + '%';
         });
 
-        insightsContent.innerHTML = html;
+        if (selectedDrivers.size === 1) {
+            renderTelemetryChart(Array.from(selectedDrivers)[0]);
+        }
+    }
+
+    function renderTelemetryChart(drv) {
+        var canvas = document.getElementById("telemetryChartCanvas");
+        if (!canvas) return;
+
+        var frame = raceData.frames[currentFrame];
+        var currentT = frame.t;
+        var startT = Math.max(0, currentT - 30);
+        
+        var labels = [];
+        var dataSpeed = [];
+        var dataGear = [];
+        var dataThrottle = [];
+        var dataBrake = [];
+        
+        // Find start index approximately (assuming 0.5s intervals)
+        var startIdx = Math.max(0, currentFrame - 60);
+        
+        for (var i = startIdx; i <= currentFrame; i++) {
+            var f = raceData.frames[i];
+            if (f.t < startT) continue;
+            var d = f.drivers[drv];
+            if (!d) continue;
+            labels.push(f.t.toFixed(1));
+            dataSpeed.push(d.speed);
+            dataGear.push(d.gear * 30); // scale gear for visualization
+            dataThrottle.push(d.throttle);
+            dataBrake.push(d.brake);
+        }
+
+        if (!telemetryChart) {
+            Chart.defaults.color = 'rgba(255, 255, 255, 0.7)';
+            Chart.defaults.font.family = "'JetBrains Mono', monospace";
+            telemetryChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Speed', data: dataSpeed, borderColor: '#fff', borderWidth: 2, pointRadius: 0, tension: 0.1, yAxisID: 'y' },
+                        { label: 'Gear (*30)', data: dataGear, borderColor: '#555', borderWidth: 1, pointRadius: 0, stepline: true, yAxisID: 'y' },
+                        { label: 'Throttle', data: dataThrottle, borderColor: '#2ecc71', borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y1' },
+                        { label: 'Brake', data: dataBrake, borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { display: true, min: 0, max: 350, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { stepSize: 100 } },
+                        y1: { display: false, min: 0, max: 100 }
+                    }
+                }
+            });
+        } else {
+            telemetryChart.data.labels = labels;
+            telemetryChart.data.datasets[0].data = dataSpeed;
+            telemetryChart.data.datasets[1].data = dataGear;
+            telemetryChart.data.datasets[2].data = dataThrottle;
+            telemetryChart.data.datasets[3].data = dataBrake;
+            telemetryChart.update('none');
+        }
     }
 
     function play() {
@@ -741,6 +691,57 @@
         if (currentFrame % 3 === 0) {
             updateLeaderboard();
             updateInsights();
+        } else if (selectedDrivers.size === 1) {
+            renderTelemetryChart(Array.from(selectedDrivers)[0]);
+        }
+
+        // Update Weather
+        if (frame.weather) {
+            document.getElementById("wAir").textContent = frame.weather.air_temp + "°C";
+            document.getElementById("wTrack").textContent = frame.weather.track_temp + "°C";
+            document.getElementById("wHum").textContent = frame.weather.humidity + "%";
+            document.getElementById("wWind").textContent = frame.weather.wind_speed + " km/h";
+            document.getElementById("wWindDir").style.transform = "rotate(" + frame.weather.wind_direction + "deg)";
+            document.getElementById("wRain").textContent = frame.weather.rainfall ? "Yes" : "No";
+        }
+
+        // Update Race Control Messages
+        if (raceData.raceControlMessages && raceData.raceControlMessages.length > 0) {
+            var rcFeed = document.getElementById("raceControlFeed");
+            // Find messages up to current time
+            var t = frame.t;
+            var visibleMsgs = raceData.raceControlMessages.filter(function(m) { return m.time <= t; });
+            
+            // To optimize, only update if length changed
+            if (rcFeed.dataset.msgCount != visibleMsgs.length) {
+                if (visibleMsgs.length === 0) {
+                    rcFeed.innerHTML = '<div class="rc-placeholder">Waiting for messages...</div>';
+                } else {
+                    var html = "";
+                    for (var i = visibleMsgs.length - 1; i >= 0; i--) {
+                        var m = visibleMsgs[i];
+                        var catClass = "";
+                        var flagLower = (m.flag || "").toLowerCase();
+                        if (flagLower.includes("yellow")) catClass = "cat-flag";
+                        else if (flagLower.includes("red")) catClass = "cat-penalty";
+                        else if (flagLower.includes("green")) catClass = "cat-drs";
+                        else if (m.category === "SafetyCar") catClass = "cat-safetycar";
+                        else if (m.category === "Drs") catClass = "cat-drs";
+                        else if (m.category === "CarInvestigation") catClass = "cat-investigation";
+                        
+                        var mins = Math.floor(m.time / 60);
+                        var secs = Math.floor(m.time % 60);
+                        var timeStr = (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+                        
+                        html += '<div class="rc-msg ' + catClass + '">';
+                        html += '<span class="rc-time">T+' + timeStr + ' | ' + m.category + '</span>';
+                        html += '<span class="rc-text">' + m.message + '</span>';
+                        html += '</div>';
+                    }
+                    rcFeed.innerHTML = html;
+                }
+                rcFeed.dataset.msgCount = visibleMsgs.length;
+            }
         }
     }
 
@@ -834,71 +835,84 @@
         });
     }
 
+    var keyboardHandler = function (e) {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+        if (!raceData) return;
+
+        switch (e.key) {
+            case " ":
+                e.preventDefault();
+                togglePlayPause();
+                break;
+            case "ArrowLeft":
+                e.preventDefault();
+                rewind();
+                break;
+            case "ArrowRight":
+                e.preventDefault();
+                fastForward();
+                break;
+            case "ArrowUp":
+                e.preventDefault();
+                increaseSpeed();
+                break;
+            case "ArrowDown":
+                e.preventDefault();
+                decreaseSpeed();
+                break;
+            case "1":
+                setSpeed(0);
+                break;
+            case "2":
+                setSpeed(1);
+                break;
+            case "3":
+                setSpeed(2);
+                break;
+            case "4":
+                setSpeed(3);
+                break;
+            case "r":
+            case "R":
+                restart();
+                break;
+            case "d":
+            case "D":
+                showDRS = !showDRS;
+                renderFrame();
+                break;
+            case "b":
+            case "B":
+                showProgressBar = !showProgressBar;
+                progressBarContainer.style.display = showProgressBar ? "" : "none";
+                break;
+            case "l":
+            case "L":
+                showDriverNames = !showDriverNames;
+                renderFrame();
+                break;
+            case "h":
+            case "H":
+                legendOverlay.style.display = legendOverlay.style.display === "none" ? "flex" : "none";
+                break;
+        }
+    };
+
     function setupKeyboard() {
-        document.addEventListener("keydown", function (e) {
-
-            if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
-            if (!raceData) return;
-
-            switch (e.key) {
-                case " ":
-                    e.preventDefault();
-                    togglePlayPause();
-                    break;
-                case "ArrowLeft":
-                    e.preventDefault();
-                    rewind();
-                    break;
-                case "ArrowRight":
-                    e.preventDefault();
-                    fastForward();
-                    break;
-                case "ArrowUp":
-                    e.preventDefault();
-                    increaseSpeed();
-                    break;
-                case "ArrowDown":
-                    e.preventDefault();
-                    decreaseSpeed();
-                    break;
-                case "1":
-                    setSpeed(0);
-                    break;
-                case "2":
-                    setSpeed(1);
-                    break;
-                case "3":
-                    setSpeed(2);
-                    break;
-                case "4":
-                    setSpeed(3);
-                    break;
-                case "r":
-                case "R":
-                    restart();
-                    break;
-                case "d":
-                case "D":
-                    showDRS = !showDRS;
-                    renderFrame();
-                    break;
-                case "b":
-                case "B":
-                    showProgressBar = !showProgressBar;
-                    progressBarContainer.style.display = showProgressBar ? "" : "none";
-                    break;
-                case "l":
-                case "L":
-                    showDriverNames = !showDriverNames;
-                    renderFrame();
-                    break;
-                case "h":
-                case "H":
-                    legendOverlay.style.display = legendOverlay.style.display === "none" ? "flex" : "none";
-                    break;
-            }
-        });
+        // Prevent duplicate bindings on Turbo Drive navigations
+        document.removeEventListener("keydown", keyboardHandler);
+        document.addEventListener("keydown", keyboardHandler);
     }
+
+    // Cleanup when Turbo Drive navigates away
+    document.addEventListener("turbo:before-render", function() {
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+        isPlaying = false;
+        document.removeEventListener("keydown", keyboardHandler);
+    }, { once: true });
 
     init();
 })();

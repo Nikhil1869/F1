@@ -8,3 +8,5 @@ numpy
 requests
 python-dotenv
 xgboost
+flask-sqlalchemy
+flask-login

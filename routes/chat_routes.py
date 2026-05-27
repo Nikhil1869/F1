@@ -1,9 +1,8 @@
 import os
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
-LLM_API_KEY = os.getenv("LLM_API_KEY") 
 
 RACE_ENGINEER_PROMPT = """
 You are a highly experienced, concise F1 Race Engineer talking directly to your driver over the team radio.
@@ -21,15 +20,17 @@ def chat():
     context = data.get("context", {})
 
     telemetry_str = f"[TELEMETRY] Lap: {context.get('lap', 'Unknown')} | Pos: P{context.get('position', 'Unknown')} | Speed: {context.get('speed', 0)} km/h | Target Driver: {context.get('driver', 'None')}."
+    
+    api_key = current_app.config.get("LLM_API_KEY")
 
-    if not LLM_API_KEY:
+    if not api_key:
         # Fallback if no API key is provided
         return jsonify({"reply": "Radio check. (LLM_API_KEY not configured). " + telemetry_str})
 
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": "llama-3.1-8b-instant",
                 "messages": [
@@ -41,6 +42,6 @@ def chat():
         )
         reply = response.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        reply = f"Radio check, we missed that. Try again. (Error: {str(e)})"
+        reply = f"Radio check, we missed that. Try again. (Error: {str(e)} | Details: {response.text if 'response' in locals() else 'No response'})"
 
     return jsonify({"reply": reply})

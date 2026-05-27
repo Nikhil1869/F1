@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 from scipy.spatial import cKDTree
 
 from config import CACHE_DIR, DEFAULT_YEAR
+from ml_models.tyre_model import calculate_tyre_health
 
 warnings.filterwarnings("ignore")
 
@@ -248,10 +249,19 @@ def _process_single_driver(args):
         gear_all, drs_all, throttle_all, brake_all = [], [], [], []
 
         total_d = 0.0
+        laps_info = {}
 
         for _, lap in laps_driver.iterlaps():
             lap_tel = lap.get_telemetry()
-            lap_num = lap.LapNumber
+            lap_num = int(lap.LapNumber)
+            compound = str(lap.Compound)
+            life = int(lap.TyreLife) if pd.notna(lap.TyreLife) else 0
+            
+            laps_info[lap_num] = {
+                "compound": compound,
+                "life": life,
+                "health": round(calculate_tyre_health(compound, life), 1)
+            }
             if lap_tel.empty:
                 continue
 
@@ -284,6 +294,7 @@ def _process_single_driver(args):
                 "drs": np.concatenate(drs_all)[order], "throttle": np.concatenate(throttle_all)[order],
                 "brake": np.concatenate(brake_all)[order],
             },
+            "laps_info": laps_info,
             "t_min": t.min(), "t_max": t.max(),
         }
     except Exception as e:
@@ -328,7 +339,7 @@ def load_replay():
 
     try:
         session = fastf1.get_session(year, round_num, session_type)
-        session.load(telemetry=True, weather=False, messages=False)
+        session.load(telemetry=True, weather=True, messages=True)
 
         driver_info = {}
         for _, row in session.results.iterrows():
@@ -348,6 +359,8 @@ def load_replay():
                 }
 
         track_coords = []
+        track_geometry = {}
+        drs_zones = []
         fastest = session.laps.pick_fastest()
         if fastest is not None:
             pos = fastest.get_pos_data()
@@ -356,6 +369,32 @@ def load_replay():
                 for i in range(0, len(pos), step):
                     track_coords.append([round(float(pos["X"].iloc[i]), 1), round(float(pos["Y"].iloc[i]), 1)])
                 if track_coords: track_coords.append(track_coords[0])
+            
+            # Extract DRS Zones
+            tel = fastest.get_telemetry()
+            if tel is not None and not tel.empty and "DRS" in tel.columns:
+                in_drs = False
+                start_idx = 0
+                for i in range(len(tel)):
+                    drs_val = tel["DRS"].iloc[i]
+                    if drs_val >= 10 and not in_drs:
+                        in_drs = True
+                        start_idx = i
+                    elif drs_val < 10 and in_drs:
+                        in_drs = False
+                        end_idx = i
+                        # Downsample for frontend
+                        drs_coords = []
+                        for j in range(start_idx, end_idx, max(1, (end_idx - start_idx) // 20)):
+                            drs_coords.append([round(float(tel["X"].iloc[j]), 1), round(float(tel["Y"].iloc[j]), 1)])
+                        if drs_coords:
+                            drs_zones.append(drs_coords)
+                if in_drs:
+                    drs_coords = []
+                    for j in range(start_idx, len(tel), max(1, (len(tel) - start_idx) // 20)):
+                        drs_coords.append([round(float(tel["X"].iloc[j]), 1), round(float(tel["Y"].iloc[j]), 1)])
+                    if drs_coords:
+                        drs_zones.append(drs_coords)
 
         driver_args = [(d_no, session, session.get_driver(d_no)["Abbreviation"]) for d_no in session.drivers]
         driver_data = {}
@@ -396,6 +435,50 @@ def load_replay():
                     formatted_statuses[-1]["end_time"] = sts
                 formatted_statuses.append({"status": ts["Status"], "start_time": sts, "end_time": None})
 
+        # Process Race Control Messages
+        race_control_messages = []
+        if hasattr(session, "race_control_messages") and not session.race_control_messages.empty:
+            for _, msg in session.race_control_messages.iterrows():
+                time_val = msg["Time"]
+                if hasattr(time_val, "total_seconds"):
+                    msg_time = time_val.total_seconds() - t_global_min
+                else:
+                    msg_time = (time_val - session.t0_date).total_seconds() - t_global_min
+                
+                # Keep pre-race messages but clamp them to 0.0 so they appear immediately
+                if msg_time < 0.0:
+                    msg_time = 0.0
+                
+                race_control_messages.append({
+                        "time": round(msg_time, 3),
+                        "category": str(msg.get("Category", "")),
+                        "message": str(msg.get("Message", "")),
+                        "flag": str(msg.get("Flag", "")),
+                        "scope": str(msg.get("Scope", "")),
+                        "sector": str(msg.get("Sector", "")),
+                        "racingNumber": str(msg.get("RacingNumber", ""))
+                    })
+
+        # Process Weather
+        weather_frames = []
+        if hasattr(session, "weather_data") and not session.weather_data.empty:
+            w_df = session.weather_data
+            w_time = w_df["Time"].dt.total_seconds().to_numpy() - t_global_min
+            valid_w = w_time > 0
+            w_time = w_time[valid_w]
+            if len(w_time) > 0:
+                for i, t in enumerate(timeline):
+                    idx = np.searchsorted(w_time, t)
+                    idx = min(idx, len(w_time) - 1)
+                    weather_frames.append({
+                        "air_temp": round(float(w_df["AirTemp"].iloc[idx]), 1),
+                        "track_temp": round(float(w_df["TrackTemp"].iloc[idx]), 1),
+                        "humidity": round(float(w_df["Humidity"].iloc[idx]), 1),
+                        "wind_speed": round(float(w_df["WindSpeed"].iloc[idx]), 1),
+                        "wind_direction": round(float(w_df["WindDirection"].iloc[idx]), 1),
+                        "rainfall": bool(w_df["Rainfall"].iloc[idx])
+                    })
+
         frames = []
         retired = set()
         for i, t in enumerate(timeline):
@@ -415,22 +498,42 @@ def load_replay():
                     if dist - dist_past < 1.0 and driver_info[code]["isRetired"]:
                         retired.add(code)
                         continue
+                
+                lap_info = driver_data[code].get("laps_info", {}).get(lap, {"compound": "UNKNOWN", "life": 0, "health": 100.0})
 
                 frame["drivers"][code] = {
                     "x": round(x, 1), "y": round(y, 1), "dist": round(dist, 1), "lap": lap,
                     "speed": int(d["speed"][i]), "gear": int(d["gear"][i]), "drs": int(d["drs"][i]),
-                    "throttle": round(float(d["throttle"][i]), 1), "brake": round(float(d["brake"][i]), 1)
+                    "throttle": round(float(d["throttle"][i]), 1), "brake": round(float(d["brake"][i]), 1),
+                    "compound": lap_info["compound"], "tyreLife": lap_info["life"], "tyreHealth": lap_info.get("health", 100.0)
                 }
             frames.append(frame)
 
         sc_frames = _compute_safety_car_positions(frames, formatted_statuses, session)
         for i, frame in enumerate(frames):
             frame["safety_car"] = sc_frames[i] if sc_frames is not None and i < len(sc_frames) else None
+            frame["weather"] = weather_frames[i] if weather_frames and i < len(weather_frames) else None
+
+        circuit_info = session.get_circuit_info()
+        circuit_length = float(session.event.get('circuit_length', 5000)) if session.event is not None else 5000
+        rotation_deg = float(circuit_info.rotation) if circuit_info else 0.0
 
         response_data = {
             "year": year, "round": round_num, "eventName": session.event["EventName"],
             "track": track_coords, "totalLaps": int(all(frames) and frames[-1]["lap"] or 1),
             "drivers": driver_info, "frames": frames, "dt": DT,
+            "drsZones": drs_zones,
+            "raceControlMessages": race_control_messages,
+            "sessionInfo": {
+                "eventName": session.event["EventName"],
+                "circuitName": session.event.get("EventName", ""),
+                "country": session.event.get("Country", ""),
+                "year": year,
+                "date": str(session.event.get("EventDate", "")),
+                "totalLaps": int(all(frames) and frames[-1]["lap"] or 1),
+                "circuitLength": circuit_length,
+                "rotation": rotation_deg
+            }
         }
 
         try:

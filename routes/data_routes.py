@@ -1,5 +1,8 @@
+import json
 import os
+import threading
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import fastf1
 import pandas as pd
@@ -15,23 +18,80 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
 _session_cache = {}
+_session_lock = threading.Lock()
+
+# ── Persistent JSON disk cache ──────────────────────────────────────────
+_API_CACHE_DIR = os.path.join(CACHE_DIR, "api_results")
+os.makedirs(_API_CACHE_DIR, exist_ok=True)
 
 
+def get_cached_result(cache_key):
+    """Read a previously-saved JSON result from disk."""
+    path = os.path.join(_API_CACHE_DIR, f"{cache_key}.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def save_cached_result(cache_key, data):
+    """Persist a JSON-serialisable result to disk."""
+    path = os.path.join(_API_CACHE_DIR, f"{cache_key}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+# ── Session loading (thread-safe) ───────────────────────────────────────
 def get_session(year, round_num, session_type="R"):
     key = (year, round_num, session_type)
-    if key not in _session_cache:
-        session = fastf1.get_session(year, round_num, session_type)
-        session.load(
-            telemetry=(session_type == "Q"),
-            weather=False,
-            messages=False,
-        )
+    with _session_lock:
+        if key in _session_cache:
+            return _session_cache[key]
+    # Load outside the lock (I/O bound)
+    session = fastf1.get_session(year, round_num, session_type)
+    session.load(
+        telemetry=(session_type == "Q"),
+        weather=False,
+        messages=False,
+    )
+    with _session_lock:
         _session_cache[key] = session
-    return _session_cache[key]
+    return session
+
+
+def load_sessions_concurrent(year, round_nums, session_type="R", max_workers=4):
+    """Load multiple sessions in parallel. Returns {round_num: session}."""
+    results = {}
+
+    def _load(rnd):
+        return rnd, get_session(year, rnd, session_type)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_load, rnd): rnd for rnd in round_nums}
+        for future in as_completed(futures):
+            try:
+                rnd, session = future.result()
+                results[rnd] = session
+            except Exception:
+                pass
+    return results
 
 
 @data_bp.route("/team-points")
 def team_points():
+    cache_key = "data_team_points"
+    if cache_key in _session_cache: return jsonify(_session_cache[cache_key])
+    disk = get_cached_result(cache_key)
+    if disk:
+        _session_cache[cache_key] = disk
+        return jsonify(disk)
+        
     try:
         session = get_session(DEFAULT_YEAR, DEFAULT_ROUND)
         results = session.results
@@ -51,11 +111,15 @@ def team_points():
             .head(10)
         )
 
-        return jsonify({
+        result = {
             "teams": teams.to_dict(orient="records"),
             "drivers": drivers.to_dict(orient="records"),
             "race": "2024 Bahrain Grand Prix",
-        })
+        }
+        _session_cache[cache_key] = result
+        save_cached_result(cache_key, result)
+        
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -64,6 +128,14 @@ def team_points():
 def telemetry():
     d1 = request.args.get("d1", "VER")
     d2 = request.args.get("d2", "LEC")
+    
+    cache_key = f"data_telemetry_{d1}_{d2}"
+    if cache_key in _session_cache: return jsonify(_session_cache[cache_key])
+    disk = get_cached_result(cache_key)
+    if disk:
+        _session_cache[cache_key] = disk
+        return jsonify(disk)
+        
     try:
         session = get_session(DEFAULT_YEAR, DEFAULT_ROUND, "Q")
 
@@ -78,7 +150,7 @@ def telemetry():
         def _slice(series):
             return series.iloc[::step].tolist()
 
-        return jsonify({
+        result = {
             "d1": d1,
             "d2": d2,
             "tel1": {
@@ -94,6 +166,11 @@ def telemetry():
                 "brake":    _slice(tel2["Brake"].astype(int)),
             },
             "session": "2024 Bahrain Qualifying",
-        })
+        }
+        
+        _session_cache[cache_key] = result
+        save_cached_result(cache_key, result)
+        
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

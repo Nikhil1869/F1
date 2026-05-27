@@ -7,7 +7,8 @@
     <meta name="description" content="Explore Formula 1 data through interactive visualizations, telemetry analysis, and machine learning predictions.">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -19,9 +20,14 @@
             <div class="hero-badge">DATA DRIVEN</div>
             <h1>F1 <span class="gradient-text">Data Lab</span></h1>
             <p class="hero-sub">Race Analytics · Telemetry · ML Predictions · AI Engineer</p>
-            <a href="/replay" class="btn-primary btn-lg" style="display:inline-flex;align-items:center;gap:8px;margin-top:20px;text-decoration:none;">
-                🏁 <span>Race Replay</span>
-            </a>
+            <div style="display:flex;gap:12px;margin-top:20px;align-items:center;flex-wrap:wrap;justify-content:center;">
+                <a href="/replay" class="btn-primary btn-lg" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+                    🏁 <span>Race Replay</span>
+                </a>
+                <a href="/login" class="btn-outline btn-lg" id="loginBtn" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+                    🔐 <span>Login</span>
+                </a>
+            </div>
         </div>
         <div class="speed-lines">
             <span></span><span></span><span></span><span></span><span></span>
@@ -43,6 +49,21 @@
         </button>
         <button class="tab-btn" data-tab="part5" id="btn-part5">
             <span class="tab-icon">💬</span> AI Engineer
+        </button>
+        <button class="tab-btn" data-tab="season" id="btn-season">
+            <span class="tab-icon">🏆</span> Season
+        </button>
+        <button class="tab-btn" data-tab="fantasy" id="btn-fantasy">
+            <span class="tab-icon">🎮</span> Fantasy F1
+        </button>
+        <button class="tab-btn" data-tab="h2h" id="btn-h2h">
+            <span class="tab-icon">⚔️</span> Head to Head
+        </button>
+        <button class="tab-btn" data-tab="laptimes" id="btn-laptimes">
+            <span class="tab-icon">⏱️</span> Lap Times
+        </button>
+        <button class="tab-btn" data-tab="calendar" id="btn-calendar">
+            <span class="tab-icon">📅</span> Calendar
         </button>
     </nav>
 
@@ -108,9 +129,16 @@
         <section class="tab-panel" id="panel-part3">
             <div class="section-header">
                 <h2>Part 3 — <span class="gradient-text">Predict The Winner</span></h2>
-                <p>Baseline Random Forest model trained on 2023 season data</p>
+                <p>Dynamic ML model trained on track-specific history (1950-2026)</p>
             </div>
-            <button class="btn-primary btn-lg" id="btnRunBaseline">🚀 Run Baseline Model</button>
+            <div class="glass-card driver-selector" style="margin-bottom: 20px;">
+                <label>Select Upcoming Race:
+                    <select id="upcomingRaceSelect">
+                        <option>Loading races...</option>
+                    </select>
+                </label>
+            </div>
+            <button class="btn-primary btn-lg" id="btnRunBaseline">🚀 Predict Winner</button>
             <div class="card-grid" id="part3Results" style="display:none;">
                 <div class="glass-card metric-card">
                     <div class="metric-label">Accuracy</div>
@@ -142,7 +170,10 @@
                 <h2>Part 4 — <span class="gradient-text">Improved ML Model</span></h2>
                 <p>Feature engineering (DriverForm) + GridSearchCV hyperparameter tuning</p>
             </div>
-            <button class="btn-primary btn-lg" id="btnRunAdvanced">🧠 Run Advanced Model</button>
+            <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+                <button class="btn-primary btn-lg" id="btnRunAdvanced">🧠 Run Advanced Model</button>
+                <button class="btn-outline btn-lg" id="btnSimulateSeason" style="color:var(--text-primary);border-color:rgba(255,255,255,0.2);">🔮 Simulate Rest of Season</button>
+            </div>
             <div class="card-grid" id="part4Results" style="display:none;">
                 <div class="glass-card metric-card">
                     <div class="metric-label">Accuracy</div>
@@ -167,6 +198,17 @@
                     <div class="predictions-list" id="p4Predictions"></div>
                 </div>
             </div>
+            
+            <div id="seasonSimResults" style="display:none;margin-top:30px;">
+                <h3 style="margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">Predicted 2026 Final Standings</h3>
+                <div class="card-grid">
+                    <div class="glass-card" style="grid-column: 1 / -1;">
+                        <div class="predictions-list" id="simStandingsList" style="max-height: 400px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+                <h3 style="margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">Predicted Podiums for Remaining Races</h3>
+                <div class="card-grid" id="simRacesGrid"></div>
+            </div>
         </section>
 
         <section class="tab-panel" id="panel-part5">
@@ -186,11 +228,284 @@
                     </div>
                 </div>
                 <div class="chat-input-row">
+                    <button class="btn-icon" id="btnVoice" title="Hold to speak (Voice Input)">
+                        🎙️
+                    </button>
                     <input type="text" id="chatInput"
                            placeholder="Ask about F1 data... e.g. Who won round 1 in 2023?"
                            autocomplete="off">
                     <button class="btn-primary" id="btnSendChat">Send</button>
+                    <button class="btn-icon" id="btnTTS" title="Toggle voice responses">
+                        🔊
+                    </button>
                 </div>
+            </div>
+        </section>
+
+        <section class="tab-panel" id="panel-season">
+            <div class="section-header">
+                <h2>Season — <span class="gradient-text">Leaderboard Dashboard</span></h2>
+                <p>Driver &amp; constructor championship progression across the full season</p>
+            </div>
+            <div class="glass-card driver-selector">
+                <label>Season:
+                    <select id="seasonYearSelect">
+                        <option value="2024" selected>2024</option>
+                        <option value="2023">2023</option>
+                    </select>
+                </label>
+                <button class="btn-primary" id="btnLoadSeason">Load Season Data</button>
+            </div>
+            <div id="seasonResults" style="display:none;">
+                <div class="card-grid">
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Races Loaded</div>
+                        <div class="metric-value" id="seasonRaces">—</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Championship Leader</div>
+                        <div class="metric-value small" id="seasonLeader">—</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Total Drivers</div>
+                        <div class="metric-value" id="seasonDriverCount">—</div>
+                    </div>
+                </div>
+                <div class="glass-card chart-card full-width">
+                    <h3>Driver Championship Progression</h3>
+                    <div class="chart-container tall"><canvas id="seasonDriverChart"></canvas></div>
+                </div>
+                <div class="glass-card chart-card full-width">
+                    <h3>Constructor Championship Progression</h3>
+                    <div class="chart-container tall"><canvas id="seasonTeamChart"></canvas></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="tab-panel" id="panel-fantasy">
+            <div class="section-header">
+                <h2>Fantasy — <span class="gradient-text">F1 Mini-Game</span></h2>
+                <p>Pick your 5 drivers and see how they score based on ML predictions</p>
+            </div>
+            <div class="glass-card fantasy-draft" id="fantasyDraft">
+                <h3>Draft Your Team <span style="font-weight:400;color:var(--text-secondary);">(pick exactly 5 drivers)</span></h3>
+                <div class="fantasy-grid" id="fantasyGrid"></div>
+                <div class="fantasy-actions">
+                    <div class="fantasy-selected" id="fantasySelected">Selected: 0 / 5</div>
+                    <button class="btn-primary btn-lg" id="btnSimulateFantasy" disabled>🎲 Simulate Race</button>
+                </div>
+            </div>
+            <div id="fantasyResults" style="display:none;">
+                <div class="card-grid">
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Your Score</div>
+                        <div class="metric-value" id="fantasyScore">&mdash;</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Best Possible</div>
+                        <div class="metric-value" id="fantasyBest">&mdash;</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Rating</div>
+                        <div class="metric-value" id="fantasyRating">&mdash;</div>
+                    </div>
+                </div>
+                <div class="card-grid">
+                    <div class="glass-card chart-card">
+                        <h3>Your Team — Predicted Grid Position</h3>
+                        <div class="chart-container"><canvas id="fantasyGridChart"></canvas></div>
+                    </div>
+                    <div class="glass-card chart-card">
+                        <h3>Score Breakdown</h3>
+                        <div class="chart-container"><canvas id="fantasyScoreChart"></canvas></div>
+                    </div>
+                </div>
+                <div class="glass-card chart-card full-width">
+                    <h3>Top 10 — Podium Probability</h3>
+                    <div class="chart-container tall"><canvas id="fantasyProbChart"></canvas></div>
+                </div>
+                <div class="glass-card">
+                    <h3>Your Team Results</h3>
+                    <div class="predictions-list" id="fantasyTeamResults"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ HEAD TO HEAD ═══ -->
+        <section class="tab-panel" id="panel-h2h">
+            <div class="section-header">
+                <h2>Driver — <span class="gradient-text">Head to Head</span></h2>
+                <p>Compare any two drivers across an entire season</p>
+            </div>
+            <div class="glass-card driver-selector">
+                <label>Season:
+                    <select id="h2hYear">
+                        <option value="2024" selected>2024</option>
+                        <option value="2023">2023</option>
+                    </select>
+                </label>
+                <label>Driver 1:
+                    <select id="h2hD1"><option>Loading...</option></select>
+                </label>
+                <span class="vs-badge">VS</span>
+                <label>Driver 2:
+                    <select id="h2hD2"><option>Loading...</option></select>
+                </label>
+                <button class="btn-primary" id="btnCompareH2H">⚔️ Compare</button>
+            </div>
+
+            <div id="h2hResults" style="display:none;">
+                <!-- H2H Record Banner -->
+                <div class="glass-card h2h-banner" id="h2hBanner">
+                    <div class="h2h-side h2h-left">
+                        <div class="h2h-driver-code" id="h2hCode1">VER</div>
+                        <div class="h2h-driver-team" id="h2hTeam1">Red Bull Racing</div>
+                        <div class="h2h-score" id="h2hWins1">0</div>
+                    </div>
+                    <div class="h2h-vs-center">
+                        <div class="h2h-vs-label">HEAD TO HEAD</div>
+                        <div class="h2h-vs-icon">⚔️</div>
+                    </div>
+                    <div class="h2h-side h2h-right">
+                        <div class="h2h-driver-code" id="h2hCode2">NOR</div>
+                        <div class="h2h-driver-team" id="h2hTeam2">McLaren</div>
+                        <div class="h2h-score" id="h2hWins2">0</div>
+                    </div>
+                </div>
+
+                <!-- Stats Comparison -->
+                <div class="h2h-stats-grid" id="h2hStatsGrid"></div>
+
+                <!-- Charts -->
+                <div class="card-grid">
+                    <div class="glass-card chart-card">
+                        <h3>Performance Radar</h3>
+                        <div class="chart-container"><canvas id="h2hRadarChart"></canvas></div>
+                    </div>
+                    <div class="glass-card chart-card">
+                        <h3>Race-by-Race Finish Position</h3>
+                        <div class="chart-container"><canvas id="h2hRaceChart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ LAP TIMES ═══ -->
+        <section class="tab-panel" id="panel-laptimes">
+            <div class="section-header">
+                <h2>Lap Times — <span class="gradient-text">Race Analysis</span></h2>
+                <p>Stint degradation, lap time distributions, and fastest laps</p>
+            </div>
+            <div class="glass-card driver-selector">
+                <label>Year:
+                    <select id="ltYear">
+                        <option value="2024" selected>2024</option>
+                        <option value="2023">2023</option>
+                    </select>
+                </label>
+                <label>Race:
+                    <select id="ltRace"><option>Loading races...</option></select>
+                </label>
+                <button class="btn-primary" id="btnLoadLapTimes">⏱️ Analyze</button>
+            </div>
+
+            <div id="ltResults" style="display:none;">
+                <!-- Driver filter -->
+                <div class="glass-card" style="margin-bottom:16px;">
+                    <h3 style="font-size:0.8rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Select Drivers</h3>
+                    <div class="driver-checkbox-grid" id="ltDriverGrid"></div>
+                </div>
+
+                <!-- Lap Time Chart -->
+                <div class="glass-card chart-card full-width">
+                    <h3>Lap Times by Driver & Compound</h3>
+                    <div class="chart-container tall"><canvas id="ltLapChart"></canvas></div>
+                </div>
+
+                <div class="card-grid">
+                    <!-- Compound Stats -->
+                    <div class="glass-card chart-card">
+                        <h3>Average Pace by Compound</h3>
+                        <div class="chart-container"><canvas id="ltCompoundChart"></canvas></div>
+                    </div>
+                    <!-- Fastest Laps -->
+                    <div class="glass-card">
+                        <h3 style="font-size:0.8rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;">⚡ Fastest Laps</h3>
+                        <div class="predictions-list" id="ltFastestList"></div>
+                    </div>
+                </div>
+
+                <!-- Stint Degradation -->
+                <div class="glass-card chart-card full-width">
+                    <h3>Stint Degradation</h3>
+                    <div class="chart-container tall"><canvas id="ltStintChart"></canvas></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ CALENDAR ═══ -->
+        <section class="tab-panel" id="panel-calendar">
+            <div class="section-header">
+                <h2>Race — <span class="gradient-text">Calendar</span></h2>
+                <p>Full season schedule with results and countdown</p>
+            </div>
+            <div class="glass-card driver-selector">
+                <label>Season:
+                    <select id="calYear">
+                        <option value="2024" selected>2024</option>
+                        <option value="2023">2023</option>
+                    </select>
+                </label>
+                <button class="btn-primary" id="btnLoadCalendar">📅 Load Calendar</button>
+            </div>
+
+            <div id="calResults" style="display:none;">
+                <!-- Next Race Countdown -->
+                <div class="glass-card countdown-card" id="countdownCard" style="display:none;">
+                    <div class="countdown-label">NEXT RACE</div>
+                    <div class="countdown-race" id="countdownRace">—</div>
+                    <div class="countdown-meta" id="countdownMeta">—</div>
+                    <div class="countdown-timer" id="countdownTimer">
+                        <div class="countdown-unit">
+                            <span class="countdown-digit" id="cdDays">00</span>
+                            <span class="countdown-text">DAYS</span>
+                        </div>
+                        <div class="countdown-sep">:</div>
+                        <div class="countdown-unit">
+                            <span class="countdown-digit" id="cdHours">00</span>
+                            <span class="countdown-text">HRS</span>
+                        </div>
+                        <div class="countdown-sep">:</div>
+                        <div class="countdown-unit">
+                            <span class="countdown-digit" id="cdMins">00</span>
+                            <span class="countdown-text">MIN</span>
+                        </div>
+                        <div class="countdown-sep">:</div>
+                        <div class="countdown-unit">
+                            <span class="countdown-digit" id="cdSecs">00</span>
+                            <span class="countdown-text">SEC</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Season Progress -->
+                <div class="card-grid" style="margin-bottom:16px;">
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Completed</div>
+                        <div class="metric-value" id="calCompleted">—</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Remaining</div>
+                        <div class="metric-value" id="calRemaining">—</div>
+                    </div>
+                    <div class="glass-card metric-card">
+                        <div class="metric-label">Total Races</div>
+                        <div class="metric-value" id="calTotal">—</div>
+                    </div>
+                </div>
+
+                <!-- Race Cards Grid -->
+                <div class="calendar-grid" id="calGrid"></div>
             </div>
         </section>
 

@@ -14,8 +14,11 @@ env/
 # Environment secrets
 .env
 
-# FastF1 cache (large binary files)
-fastf1_cache/
+# FastF1 cache (large binary files — keep the folder via .gitkeep)
+fastf1_cache/*
+!fastf1_cache/.gitkeep
+precomputed/*
+!precomputed/.gitkeep
 cache/
 
 # IDE

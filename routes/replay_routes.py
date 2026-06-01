@@ -1,30 +1,39 @@
 
 import os
 import pickle
+import threading
+import traceback
 import warnings
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
-import fastf1
 import numpy as np
 import pandas as pd
 from flask import Blueprint, jsonify, request
 from scipy.spatial import cKDTree
 
-from config import CACHE_DIR, DEFAULT_YEAR
+from config import BASE_DIR, CACHE_DIR, DEFAULT_YEAR
 from ml_models.tyre_model import calculate_tyre_health
+from services import fastf1_service, openf1_service
+from services.data_provider import provider
 
 warnings.filterwarnings("ignore")
 
 replay_bp = Blueprint("replay", __name__, url_prefix="/api/replay")
 
-os.makedirs(CACHE_DIR, exist_ok=True)
-fastf1.Cache.enable_cache(CACHE_DIR)
-
 REPLAY_CACHE_DIR = os.path.join(CACHE_DIR, "replay_cache")
 os.makedirs(REPLAY_CACHE_DIR, exist_ok=True)
+PRECOMPUTED_DIR = os.path.join(BASE_DIR, "precomputed")
+os.makedirs(PRECOMPUTED_DIR, exist_ok=True)
 
-DT = 0.5  
+DT = 0.5
+DEFAULT_REPLAY_CHUNK_SIZE = 1500
+MIN_REPLAY_CHUNK_SIZE = 1500
+MAX_REPLAY_CHUNK_SIZE = 2000
+
+_telemetry_jobs = {}
+_telemetry_jobs_lock = threading.Lock()
 
 TEAM_COLORS = {
     "Red Bull Racing": "#3671C6",
@@ -41,9 +50,92 @@ TEAM_COLORS = {
     "Haas F1 Team": "#B6BABD",
 }
 
-def _get_cache_path(year, round_num, session_type):
+def _get_cache_path(year, round_num, session_type, sample_rate=None):
     key = f"replay_{year}_{round_num}_{session_type}"
+    if sample_rate:
+        key = f"{key}_sr{sample_rate}"
     return os.path.join(REPLAY_CACHE_DIR, f"{key}.pkl")
+
+def _get_precomputed_path(year, round_num, session_type, sample_rate):
+    key = f"replay_{year}_{round_num}_{session_type}_sr{sample_rate}.json"
+    return os.path.join(PRECOMPUTED_DIR, key)
+
+def _sample_cached_replay_data(response_data, sample_rate):
+    sample_rate = max(1, int(sample_rate or 1))
+    if sample_rate <= 1:
+        sampled = dict(response_data)
+        sampled["sampleRate"] = 1
+        return sampled
+
+    sampled = dict(response_data)
+    sampled["frames"] = response_data.get("frames", [])[::sample_rate]
+    sampled["dt"] = (response_data.get("dt") or DT) * sample_rate
+    sampled["sampleRate"] = sample_rate
+    return sampled
+
+def _load_replay_cache(year, round_num, session_type, sample_rate, refresh=False):
+    if refresh:
+        return None
+
+    cache_path = _get_cache_path(year, round_num, session_type, sample_rate=sample_rate)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as f:
+                response_data = pickle.load(f)
+            precomputed_path = _get_precomputed_path(year, round_num, session_type, sample_rate)
+            if not os.path.exists(precomputed_path):
+                _save_precomputed_replay_data(response_data, year, round_num, session_type, sample_rate)
+            return response_data
+        except Exception:
+            pass
+
+    precomputed_path = _get_precomputed_path(year, round_num, session_type, sample_rate)
+    if os.path.exists(precomputed_path):
+        try:
+            with open(precomputed_path, "r", encoding="utf-8") as f:
+                response_data = json.load(f)
+            with open(cache_path, "wb") as f:
+                pickle.dump(response_data, f)
+            return response_data
+        except Exception:
+            pass
+
+    if sample_rate > 1:
+        full_cache_path = _get_cache_path(year, round_num, session_type)
+        if os.path.exists(full_cache_path):
+            try:
+                with open(full_cache_path, "rb") as f:
+                    response_data = _sample_cached_replay_data(pickle.load(f), sample_rate)
+                with open(cache_path, "wb") as f:
+                    pickle.dump(response_data, f)
+                _save_precomputed_replay_data(response_data, year, round_num, session_type, sample_rate)
+                return response_data
+            except Exception:
+                pass
+
+    return None
+
+def _save_precomputed_replay_data(response_data, year, round_num, session_type, sample_rate):
+    precomputed_path = _get_precomputed_path(year, round_num, session_type, sample_rate)
+    try:
+        with open(precomputed_path, "w", encoding="utf-8") as f:
+            json.dump(response_data, f, separators=(",", ":"))
+    except Exception:
+        pass
+
+def _telemetry_job_key(year, round_num, session_type, sample_rate):
+    return f"{year}:{round_num}:{session_type}:{sample_rate}"
+
+def _get_telemetry_job(job_key):
+    with _telemetry_jobs_lock:
+        job = _telemetry_jobs.get(job_key)
+        return dict(job) if job else None
+
+def _set_telemetry_job(job_key, **updates):
+    with _telemetry_jobs_lock:
+        job = _telemetry_jobs.setdefault(job_key, {})
+        job.update(updates)
+        return dict(job)
 
 def _compute_safety_car_positions(frames, track_statuses, session):
 
@@ -238,7 +330,9 @@ def _compute_safety_car_positions(frames, track_statuses, session):
 
 def _process_single_driver(args):
 
-    driver_no, session, driver_code = args
+    driver_no, session, driver_code = args[:3]
+    sample_rate = args[3] if len(args) > 3 else 1
+    sample_rate = max(1, int(sample_rate or 1))
     try:
         laps_driver = session.laps.pick_drivers(driver_no)
         if laps_driver.empty:
@@ -264,6 +358,8 @@ def _process_single_driver(args):
             }
             if lap_tel.empty:
                 continue
+            if sample_rate > 1 and len(lap_tel) > sample_rate:
+                lap_tel = lap_tel.iloc[::sample_rate].copy()
 
             t_lap = lap_tel["SessionTime"].dt.total_seconds().to_numpy()
             d_lap = lap_tel["Distance"].to_numpy()
@@ -306,19 +402,417 @@ def available_sessions():
 
     year = request.args.get("year", DEFAULT_YEAR, type=int)
     try:
-        schedule = fastf1.get_event_schedule(year)
-        events = []
+        # OpenF1-first via DataProvider (instant, no FastF1 loading)
+        from services.data_provider import provider
+        events = provider.get_session_list(year, completed_only=False)
+        if events:
+            return jsonify({"year": year, "events": events})
+
+        # Fallback: FastF1 schedule
+        schedule = fastf1_service.get_event_schedule(year)
+        fallback_events = []
         for _, row in schedule.iterrows():
             if row["EventFormat"] != "testing":
-                events.append({
+                fallback_events.append({
                     "round": int(row["RoundNumber"]),
                     "name": row["EventName"],
                     "country": row.get("Country", ""),
                     "date": str(row.get("EventDate", "")),
                 })
-        return jsonify({"year": year, "events": events})
+        return jsonify({"year": year, "events": fallback_events})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+@replay_bp.route("/basic")
+def replay_basic():
+    """
+    Step 1 of Lazy Loading: Fast OpenF1 request to get session/driver info.
+    Returns almost instantly.
+    """
+    year = request.args.get("year", DEFAULT_YEAR, type=int)
+    round_num = request.args.get("round", 1, type=int)
+    session_type = request.args.get("session", "R")
+
+    try:
+        # Find session_key for the race
+        schedule = openf1_service.get_event_schedule(year)
+        session_key = None
+        event_name = f"Round {round_num}"
+        country = ""
+        for ev in schedule:
+            if ev.get("round") == round_num:
+                session_key = ev.get("session_key")
+                event_name = ev.get("name", event_name)
+                country = ev.get("country", "")
+                break
+
+        if not session_key:
+            # Keep the first lazy-loading step usable even if OpenF1 has a gap.
+            schedule_df = fastf1_service.get_event_schedule(year)
+            for _, row in schedule_df.iterrows():
+                if int(row.get("RoundNumber", 0)) == round_num:
+                    event_name = row.get("EventName", event_name)
+                    country = row.get("Country", "")
+                    break
+
+        # Get drivers from OpenF1
+        raw_drivers = openf1_service.get_drivers(session_key) if session_key else []
+        driver_info = {}
+        for d in raw_drivers:
+            abbr = d.get("name_acronym", "")
+            if not abbr:
+                continue
+            color = d.get("team_colour", "FFFFFF")
+            if not color.startswith("#"):
+                color = f"#{color}"
+            driver_info[abbr] = {
+                "abbreviation": abbr,
+                "firstName": d.get("first_name", ""),
+                "lastName": d.get("last_name", ""),
+                "team": d.get("team_name", ""),
+                "teamColor": color,
+                "position": 99,
+                "isRetired": False
+            }
+
+        return jsonify({
+            "year": year,
+            "round": round_num,
+            "session": session_type,
+            "sessionKey": session_key,
+            "eventName": event_name,
+            "sessionInfo": {
+                "eventName": event_name,
+                "country": country,
+                "year": year,
+                "totalLaps": 0,
+                "circuitLength": 0,
+                "rotation": 0
+            },
+            "drivers": driver_info,
+            "totalChunks": 0
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "trace": traceback.format_exc()}), 500
+
+def _build_sampled_replay_data(year, round_num, session_type, sample_rate):
+    session, sample_rate = fastf1_service.get_sampled_telemetry(
+        (year, round_num, session_type), sample_rate=sample_rate
+    )
+
+    driver_info = {}
+    for _, row in session.results.iterrows():
+        abbr = row.get("Abbreviation", "")
+        team = row.get("TeamName", "Unknown")
+        if abbr:
+            status = row.get("Status", "Finished")
+            finished = status in ["Finished"] or "Lap" in str(status)
+            driver_info[abbr] = {
+                "abbreviation": abbr,
+                "firstName": row.get("FirstName", ""),
+                "lastName": row.get("LastName", ""),
+                "team": team,
+                "teamColor": TEAM_COLORS.get(team, "#FFFFFF"),
+                "position": int(row["Position"]) if pd.notna(row.get("Position")) else 99,
+                "isRetired": not finished,
+            }
+
+    track_coords = []
+    drs_zones = []
+    fastest = session.laps.pick_fastest()
+    if fastest is not None:
+        pos = fastest.get_pos_data()
+        if pos is not None and not pos.empty:
+            step = max(1, len(pos) // 300)
+            for i in range(0, len(pos), step):
+                track_coords.append([round(float(pos["X"].iloc[i]), 1), round(float(pos["Y"].iloc[i]), 1)])
+            if track_coords:
+                track_coords.append(track_coords[0])
+
+        tel = fastest.get_telemetry()
+        if tel is not None and not tel.empty and "DRS" in tel.columns:
+            in_drs = False
+            start_idx = 0
+            for i in range(len(tel)):
+                drs_val = tel["DRS"].iloc[i]
+                if drs_val >= 10 and not in_drs:
+                    in_drs = True
+                    start_idx = i
+                elif drs_val < 10 and in_drs:
+                    in_drs = False
+                    end_idx = i
+                    drs_coords = []
+                    for j in range(start_idx, end_idx, max(1, (end_idx - start_idx) // 20)):
+                        drs_coords.append([round(float(tel["X"].iloc[j]), 1), round(float(tel["Y"].iloc[j]), 1)])
+                    if drs_coords:
+                        drs_zones.append(drs_coords)
+            if in_drs:
+                drs_coords = []
+                for j in range(start_idx, len(tel), max(1, (len(tel) - start_idx) // 20)):
+                    drs_coords.append([round(float(tel["X"].iloc[j]), 1), round(float(tel["Y"].iloc[j]), 1)])
+                if drs_coords:
+                    drs_zones.append(drs_coords)
+
+    driver_args = [
+        (d_no, session, session.get_driver(d_no)["Abbreviation"], sample_rate)
+        for d_no in session.drivers
+    ]
+    driver_data = {}
+    driver_laps_info = {}
+    t_global_min, t_global_max = None, None
+
+    with ThreadPoolExecutor(max_workers=min(len(driver_args), 20)) as executor:
+        for result in executor.map(_process_single_driver, driver_args):
+            if result:
+                driver_data[result["code"]] = result["data"]
+                driver_laps_info[result["code"]] = result["laps_info"]
+                if t_global_min is None or result["t_min"] < t_global_min:
+                    t_global_min = result["t_min"]
+                if t_global_max is None or result["t_max"] > t_global_max:
+                    t_global_max = result["t_max"]
+
+    if not driver_data:
+        raise ValueError("No valid telemetry data found for any driver")
+
+    local_dt = DT * sample_rate
+    timeline = np.arange(t_global_min, t_global_max, local_dt) - t_global_min
+    resampled_data = {code: {} for code in driver_data.keys()}
+
+    for code, dd in driver_data.items():
+        t_shifted = dd["t"] - t_global_min
+        resampled_data[code] = {
+            "x": np.interp(timeline, t_shifted, dd["x"]),
+            "y": np.interp(timeline, t_shifted, dd["y"]),
+            "dist": np.interp(timeline, t_shifted, dd["dist"]),
+            "lap": np.interp(timeline, t_shifted, dd["lap"]),
+            "speed": np.interp(timeline, t_shifted, dd["speed"]),
+            "gear": np.interp(timeline, t_shifted, dd["gear"]),
+            "drs": np.interp(timeline, t_shifted, dd["drs"]),
+            "throttle": np.interp(timeline, t_shifted, dd["throttle"]),
+            "brake": np.interp(timeline, t_shifted, dd["brake"]),
+        }
+
+    formatted_statuses = []
+    if hasattr(session, "track_status") and not session.track_status.empty:
+        for _, ts in session.track_status.iterrows():
+            sts = timedelta.total_seconds(ts["Time"]) - t_global_min
+            if formatted_statuses:
+                formatted_statuses[-1]["end_time"] = sts
+            formatted_statuses.append({"status": ts["Status"], "start_time": sts, "end_time": None})
+
+    race_control_messages = []
+    if hasattr(session, "race_control_messages") and not session.race_control_messages.empty:
+        for _, msg in session.race_control_messages.iterrows():
+            time_val = msg["Time"]
+            if hasattr(time_val, "total_seconds"):
+                msg_time = time_val.total_seconds() - t_global_min
+            else:
+                msg_time = (time_val - session.t0_date).total_seconds() - t_global_min
+            if msg_time < 0.0:
+                msg_time = 0.0
+            race_control_messages.append({
+                "time": round(msg_time, 3),
+                "category": str(msg.get("Category", "")),
+                "message": str(msg.get("Message", "")),
+                "flag": str(msg.get("Flag", "")),
+                "scope": str(msg.get("Scope", "")),
+                "sector": str(msg.get("Sector", "")),
+                "racingNumber": str(msg.get("RacingNumber", "")),
+            })
+
+    weather_frames = []
+    if hasattr(session, "weather_data") and not session.weather_data.empty:
+        w_df = session.weather_data
+        w_time = w_df["Time"].dt.total_seconds().to_numpy() - t_global_min
+        valid_w = w_time > 0
+        w_time = w_time[valid_w]
+        if len(w_time) > 0:
+            for _, t in enumerate(timeline):
+                idx = np.searchsorted(w_time, t)
+                idx = min(idx, len(w_time) - 1)
+                weather_frames.append({
+                    "air_temp": round(float(w_df["AirTemp"].iloc[idx]), 1),
+                    "track_temp": round(float(w_df["TrackTemp"].iloc[idx]), 1),
+                    "humidity": round(float(w_df["Humidity"].iloc[idx]), 1),
+                    "wind_speed": round(float(w_df["WindSpeed"].iloc[idx]), 1),
+                    "wind_direction": round(float(w_df["WindDirection"].iloc[idx]), 1),
+                    "rainfall": bool(w_df["Rainfall"].iloc[idx]),
+                })
+
+    frames = []
+    retired = set()
+    for i, t in enumerate(timeline):
+        frame = {"t": t, "lap": 1, "drivers": {}}
+        leader_dist = -1
+        for code, d in resampled_data.items():
+            if code in retired:
+                continue
+            x = float(d["x"][i])
+            y = float(d["y"][i])
+            dist = float(d["dist"][i])
+            lap = int(round(d["lap"][i]))
+            if lap > frame["lap"]:
+                frame["lap"] = lap
+            if dist > leader_dist:
+                leader_dist = dist
+            if i > 200:
+                dist_past = float(d["dist"][i - 20])
+                if dist - dist_past < 1.0 and driver_info[code]["isRetired"]:
+                    retired.add(code)
+                    continue
+            lap_info = driver_laps_info.get(code, {}).get(
+                lap, {"compound": "UNKNOWN", "life": 0, "health": 100.0}
+            )
+            frame["drivers"][code] = {
+                "x": round(x, 1),
+                "y": round(y, 1),
+                "dist": round(dist, 1),
+                "lap": lap,
+                "speed": int(d["speed"][i]),
+                "gear": int(d["gear"][i]),
+                "drs": int(d["drs"][i]),
+                "throttle": round(float(d["throttle"][i]), 1),
+                "brake": round(float(d["brake"][i]), 1),
+                "compound": lap_info["compound"],
+                "tyreLife": lap_info["life"],
+                "tyreHealth": lap_info.get("health", 100.0),
+            }
+        frames.append(frame)
+
+    sc_frames = _compute_safety_car_positions(frames, formatted_statuses, session)
+    for i, frame in enumerate(frames):
+        frame["safety_car"] = sc_frames[i] if sc_frames is not None and i < len(sc_frames) else None
+        frame["weather"] = weather_frames[i] if weather_frames and i < len(weather_frames) else None
+
+    circuit_info = session.get_circuit_info()
+    circuit_length = float(session.event.get("circuit_length", 5000)) if session.event is not None else 5000
+    rotation_deg = float(circuit_info.rotation) if circuit_info else 0.0
+    total_laps = int(all(frames) and frames[-1]["lap"] or 1)
+
+    return {
+        "year": year,
+        "round": round_num,
+        "eventName": session.event["EventName"],
+        "track": track_coords,
+        "totalLaps": total_laps,
+        "drivers": driver_info,
+        "frames": frames,
+        "dt": local_dt,
+        "sampleRate": sample_rate,
+        "drsZones": drs_zones,
+        "raceControlMessages": race_control_messages,
+        "sessionInfo": {
+            "eventName": session.event["EventName"],
+            "circuitName": session.event.get("EventName", ""),
+            "country": session.event.get("Country", ""),
+            "year": year,
+            "date": str(session.event.get("EventDate", "")),
+            "totalLaps": total_laps,
+            "circuitLength": circuit_length,
+            "rotation": rotation_deg,
+        },
+    }
+
+def _prepare_telemetry_job(job_key, year, round_num, session_type, sample_rate, cache_path):
+    _set_telemetry_job(job_key, status="running", error=None, trace=None)
+    try:
+        response_data = _build_sampled_replay_data(year, round_num, session_type, sample_rate)
+        with open(cache_path, "wb") as f:
+            pickle.dump(response_data, f)
+        _save_precomputed_replay_data(response_data, year, round_num, session_type, sample_rate)
+        _set_telemetry_job(job_key, status="complete")
+    except Exception as exc:
+        _set_telemetry_job(
+            job_key,
+            status="failed",
+            error=str(exc),
+            trace=traceback.format_exc(),
+        )
+
+def _start_telemetry_job(job_key, year, round_num, session_type, sample_rate, cache_path):
+    existing = _get_telemetry_job(job_key)
+    if existing and existing.get("status") in {"queued", "running"}:
+        return existing
+
+    job = _set_telemetry_job(job_key, status="queued", error=None, trace=None)
+    worker = threading.Thread(
+        target=_prepare_telemetry_job,
+        args=(job_key, year, round_num, session_type, sample_rate, cache_path),
+        daemon=True,
+    )
+    worker.start()
+    return job
+
+@replay_bp.route("/telemetry")
+def replay_telemetry():
+    """
+    Step 2 of Lazy Loading: Progressive chunked telemetry from FastF1.
+    Chunk 0 also returns trackCoords and drsZones.
+    """
+    year = request.args.get("year", DEFAULT_YEAR, type=int)
+    round_num = request.args.get("round", 1, type=int)
+    session_type = request.args.get("session", "R")
+    chunk_index = request.args.get("chunk", 0, type=int)
+    sample_rate = request.args.get("sample_rate", 5, type=int)
+    chunk_size = request.args.get("chunk_size", DEFAULT_REPLAY_CHUNK_SIZE, type=int)
+    refresh = request.args.get("refresh", "false").lower() == "true"
+
+    chunk_index = max(0, chunk_index)
+    sample_rate = max(1, sample_rate or 1)
+    chunk_size = min(MAX_REPLAY_CHUNK_SIZE, max(MIN_REPLAY_CHUNK_SIZE, chunk_size or DEFAULT_REPLAY_CHUNK_SIZE))
+
+    cache_path = _get_cache_path(year, round_num, session_type, sample_rate=sample_rate)
+    response_data = _load_replay_cache(year, round_num, session_type, sample_rate, refresh=refresh)
+    job_key = _telemetry_job_key(year, round_num, session_type, sample_rate)
+
+    if response_data is None:
+        job = _get_telemetry_job(job_key)
+        if job and job.get("status") == "failed":
+            return jsonify({
+                "status": "failed",
+                "error": job.get("error") or "Telemetry preparation failed.",
+                "message": "We could not prepare detailed telemetry for this race. Try again or pick another session.",
+                "trace": job.get("trace"),
+            }), 500
+
+        job = _start_telemetry_job(job_key, year, round_num, session_type, sample_rate, cache_path)
+        return jsonify({
+            "status": job.get("status", "queued"),
+            "jobKey": job_key,
+            "message": "Fetching detailed telemetry...",
+            "retryAfterMs": 2500,
+        }), 202
+
+    total_frames = len(response_data["frames"])
+    total_chunks = (total_frames + chunk_size - 1) // chunk_size
+
+    start_idx = chunk_index * chunk_size
+    end_idx = min(start_idx + chunk_size, total_frames)
+    chunk_frames = response_data["frames"][start_idx:end_idx]
+
+    payload = {
+        "status": "ready",
+        "chunkIndex": chunk_index,
+        "totalChunks": total_chunks,
+        "chunkSize": chunk_size,
+        "totalFrames": total_frames,
+        "startFrame": start_idx,
+        "endFrame": end_idx,
+        "frames": chunk_frames,
+        "dt": response_data["dt"],
+        "sampleRate": response_data.get("sampleRate", sample_rate),
+        "hasMore": chunk_index + 1 < total_chunks,
+    }
+
+    if chunk_index == 0:
+        payload["track"] = response_data["track"]
+        payload["drsZones"] = response_data["drsZones"]
+        payload["drivers"] = response_data["drivers"]
+        payload["raceControlMessages"] = response_data["raceControlMessages"]
+        payload["sessionInfo"] = response_data["sessionInfo"]
+        payload["totalLaps"] = response_data["totalLaps"]
+
+    return jsonify(payload)
 
 @replay_bp.route("/load")
 def load_replay():
@@ -338,8 +832,7 @@ def load_replay():
             pass
 
     try:
-        session = fastf1.get_session(year, round_num, session_type)
-        session.load(telemetry=True, weather=True, messages=True)
+        session = fastf1_service.get_session_full(year, round_num, session_type)
 
         driver_info = {}
         for _, row in session.results.iterrows():
@@ -398,12 +891,14 @@ def load_replay():
 
         driver_args = [(d_no, session, session.get_driver(d_no)["Abbreviation"]) for d_no in session.drivers]
         driver_data = {}
+        driver_laps_info = {}
         t_global_min, t_global_max = None, None
 
         with ThreadPoolExecutor(max_workers=min(len(driver_args), 20)) as executor:
             for result in executor.map(_process_single_driver, driver_args):
                 if result:
                     driver_data[result["code"]] = result["data"]
+                    driver_laps_info[result["code"]] = result["laps_info"]
                     if t_global_min is None or result["t_min"] < t_global_min: t_global_min = result["t_min"]
                     if t_global_max is None or result["t_max"] > t_global_max: t_global_max = result["t_max"]
 
@@ -499,7 +994,7 @@ def load_replay():
                         retired.add(code)
                         continue
                 
-                lap_info = driver_data[code].get("laps_info", {}).get(lap, {"compound": "UNKNOWN", "life": 0, "health": 100.0})
+                lap_info = driver_laps_info.get(code, {}).get(lap, {"compound": "UNKNOWN", "life": 0, "health": 100.0})
 
                 frame["drivers"][code] = {
                     "x": round(x, 1), "y": round(y, 1), "dist": round(dist, 1), "lap": lap,
@@ -545,7 +1040,6 @@ def load_replay():
         return jsonify(response_data)
 
     except Exception as exc:
-        import traceback
         return jsonify({"error": str(exc), "trace": traceback.format_exc()}), 500
 
 @replay_bp.route("/driver-telemetry")

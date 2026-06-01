@@ -1,0 +1,2 @@
+# This file ensures the fastf1_cache directory exists in the repo.
+# The actual cache files are gitignored.

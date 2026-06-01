@@ -2,7 +2,12 @@ import os
 import threading
 from flask import Flask, render_template, redirect, url_for
 from flask_login import login_required
-from config import Config
+from config import Config, CACHE_DIR
+
+# ── Centralised FastF1 cache — must happen before any route imports ──────
+from services.fastf1_service import init_cache
+init_cache(CACHE_DIR)
+
 from models import db, login_manager
 from routes.data_routes import data_bp
 from routes.ml_routes import ml_bp
@@ -44,20 +49,21 @@ with app.app_context():
 # ── Background pre-warm: load default session so first page load is instant ──
 def _prewarm():
     try:
-        from routes.data_routes import get_session
+        from services.fastf1_service import get_session
         print("[Pre-warm] Loading 2024 R1 session in background...")
         get_session(2024, 1)
         print("[Pre-warm] Done — Part 1 data is now cached.")
         
-        print("[Pre-warm] Loading Replay 2024 R1 in background...")
+        print("[Pre-warm] Loading Replay basic metadata 2024 R1 in background...")
         with app.test_client() as client:
-            client.get('/api/replay/load?year=2024&round=1')
+            client.get('/api/replay/basic?year=2024&round=1')
         print("[Pre-warm] Done — Replay data is now cached.")
     except Exception as e:
         print(f"[Pre-warm] Failed (non-fatal): {e}")
 
 _prewarm_thread = threading.Thread(target=_prewarm, daemon=True)
 _prewarm_thread.start()
+
 
 
 @app.route("/")
@@ -83,5 +89,5 @@ def register_page():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, threaded=True)
 

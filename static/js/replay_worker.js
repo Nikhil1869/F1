@@ -16,6 +16,7 @@ var currentFrame = 0;
 var selectedDrivers = new Set();
 var hoveredDriver = null;
 var showDRS = true;
+var cachedShowDRS = true;
 var showDriverNames = true;
 var showTelemetry = false;
 
@@ -55,6 +56,7 @@ function updateTrackTransform() {
 }
 
 function cacheTrack() {
+    if (!raceData) return;
     if (!offscreenTrack) {
         offscreenTrack = new OffscreenCanvas(canvasW * dpr, canvasH * dpr);
         offscreenTrackCtx = offscreenTrack.getContext("2d");
@@ -143,6 +145,29 @@ function cacheTrack() {
         offscreenTrackCtx.fillRect(-2, c+2, 2, 2);
     }
     offscreenTrackCtx.restore();
+    cachedShowDRS = showDRS;
+}
+
+function setRaceData(data) {
+    raceData = data;
+    driverCurrentPos = {};
+    driverTargetPos = {};
+
+    var track = raceData && raceData.track ? raceData.track : [];
+    if (track.length > 0) {
+        var xs = track.map(function(p) { return p[0]; });
+        var ys = track.map(function(p) { return p[1]; });
+        trackBounds.minX = Math.min.apply(null, xs);
+        trackBounds.maxX = Math.max.apply(null, xs);
+        trackBounds.minY = Math.min.apply(null, ys);
+        trackBounds.maxY = Math.max.apply(null, ys);
+    }
+
+    if (canvasW && canvasH) {
+        updateTrackTransform();
+        cacheTrack();
+        renderFrame();
+    }
 }
 
 function renderFrame() {
@@ -295,19 +320,23 @@ function drawSafetyCar() {
 self.onmessage = function (e) {
     var msg = e.data;
     
-    if (msg.type === "init") {
+    if (msg.type === "init_canvas" || msg.type === "init") {
         canvas = msg.canvas;
         ctx = canvas.getContext("2d");
-        raceData = msg.raceData;
-        
-        var xs = raceData.track.map(function(p) { return p[0]; });
-        var ys = raceData.track.map(function(p) { return p[1]; });
-        trackBounds.minX = Math.min.apply(null, xs);
-        trackBounds.maxX = Math.max.apply(null, xs);
-        trackBounds.minY = Math.min.apply(null, ys);
-        trackBounds.maxY = Math.max.apply(null, ys);
+        if (msg.raceData) {
+            setRaceData(msg.raceData);
+        }
     } 
+    else if (msg.type === "init_data") {
+        setRaceData(msg.raceData);
+    }
+    else if (msg.type === "append_frames" || msg.type === "update_frames") {
+        if (raceData && raceData.frames) {
+            raceData.frames = raceData.frames.concat(msg.frames || []);
+        }
+    }
     else if (msg.type === "resize") {
+        if (!ctx) return;
         canvasW = msg.w;
         canvasH = msg.h;
         dpr = msg.dpr;
@@ -317,17 +346,21 @@ self.onmessage = function (e) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         
         updateTrackTransform();
-        cacheTrack();
+        if (raceData) cacheTrack();
         renderFrame();
     }
     else if (msg.type === "render") {
+        if (!ctx || !raceData) return;
         currentFrame = msg.frame;
         selectedDrivers = new Set(msg.selectedDrivers);
         hoveredDriver = msg.hoveredDriver;
         showDRS = msg.showDRS;
         showDriverNames = msg.showDriverNames;
         showTelemetry = msg.showTelemetry;
-        
+
+        if (showDRS !== cachedShowDRS) {
+            cacheTrack();
+        }
         renderFrame();
     }
 };

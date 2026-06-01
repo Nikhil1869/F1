@@ -57,6 +57,11 @@
     var driverTargetPos = {};
 
     var worker = null;
+    var activeReplayRequest = 0;
+    var telemetryLoadDone = false;
+    var telemetryTotalChunks = 0;
+    var telemetryLoadedChunks = 0;
+    var replayStarted = false;
 
     var TYRE_COLORS = {
         SOFT: "#FF3333",
@@ -70,8 +75,11 @@
     function init() {
         if (!worker && window.Worker && canvas.transferControlToOffscreen) {
             worker = new Worker("/static/js/replay_worker.js");
+            worker.onerror = function (err) {
+                console.error("Replay worker failed", err);
+            };
             var offscreen = canvas.transferControlToOffscreen();
-            worker.postMessage({ type: "init", canvas: offscreen }, [offscreen]);
+            worker.postMessage({ type: "init_canvas", canvas: offscreen }, [offscreen]);
         }
         loadSessions(yearSelect.value);
         yearSelect.addEventListener("change", function () {
@@ -90,6 +98,59 @@
     function showLoader(text) {
         loadingText.textContent = text || "Loading...";
         loadingOverlay.classList.add("show");
+    }
+
+    function fetchJSON(url, timeoutMs) {
+        var controller = new AbortController();
+        var timeout = setTimeout(function () {
+            controller.abort();
+        }, timeoutMs || 30000);
+
+        return fetch(url, { signal: controller.signal })
+            .then(function (res) {
+                return res.json().then(function (data) {
+                    return { ok: res.ok, status: res.status, data: data };
+                });
+            })
+            .finally(function () {
+                clearTimeout(timeout);
+            });
+    }
+
+    function showActionLoader(text, buttonText, onClick) {
+        loadingText.innerHTML =
+            '<span>' + text + '</span><br><br>' +
+            '<button id="btnReplayAction" class="btn-primary" type="button">' + buttonText + '</button>';
+        loadingOverlay.classList.add("show");
+
+        var btn = document.getElementById("btnReplayAction");
+        if (btn) {
+            btn.addEventListener("click", onClick);
+        }
+    }
+
+    function showStartReplayLoader(text) {
+        showActionLoader(text, "Start Replay", function () {
+            replayStarted = true;
+            hideLoader();
+            play();
+        });
+    }
+
+    function updateTelemetryLoader(chunkIndex, totalChunks) {
+        var current = Math.min(chunkIndex + 1, totalChunks || chunkIndex + 1);
+        var total = totalChunks || "?";
+        var message = "Loading telemetry chunk " + current + "/" + total + "...";
+
+        if (replayStarted || !loadingOverlay.classList.contains("show")) {
+            return;
+        }
+
+        if (raceData && raceData.frames && raceData.frames.length > 0) {
+            showStartReplayLoader(message);
+        } else {
+            showLoader(message);
+        }
     }
 
     function hideLoader() {
@@ -142,26 +203,133 @@
     }
 
     function startReplay(year, round) {
-        sessionModal.style.display = "none";
-        showLoader("Loading race data for Round " + round + "... This may take a moment.");
+        var requestId = ++activeReplayRequest;
+        pause();
+        replayStarted = false;
+        telemetryLoadDone = false;
+        telemetryTotalChunks = 0;
+        telemetryLoadedChunks = 0;
+        currentFrame = 0;
 
-        fetch("/api/replay/load?year=" + year + "&round=" + round)
-            .then(function (res) { return res.json(); })
-            .then(function (data) {
-                if (data.error) {
-                    alert("Error loading race: " + data.error);
+        sessionModal.style.display = "none";
+        showLoader("Loading session data...");
+
+        fetchJSON("/api/replay/basic?year=" + year + "&round=" + round + "&session=R", 15000)
+            .then(function (result) {
+                if (requestId !== activeReplayRequest) return;
+                var basicData = result.data || {};
+                if (basicData.error) {
+                    alert("Could not load session data: " + basicData.error);
                     sessionModal.style.display = "";
                     hideLoader();
                     return;
                 }
-                raceData = data;
-                initReplay();
-                hideLoader();
+
+                raceData = basicData;
+                raceData.frames = [];
+                raceData.totalFrames = 0;
+                replayContainer.style.display = "";
+                eventTitle.textContent = raceData.eventName + " " + raceData.year;
+                currentLapEl.textContent = "-/" + (raceData.sessionInfo.totalLaps || "-");
+                leaderboardList.innerHTML = "";
+                insightsContent.innerHTML =
+                    '<div class="insights-placeholder">' +
+                        '<div class="placeholder-icon">...</div>' +
+                        '<p>Load full telemetry to start replay analysis</p>' +
+                    '</div>';
+
+                showActionLoader("Session data ready.", "Load Full Telemetry", function () {
+                    showLoader("Fetching detailed telemetry...");
+                    loadTelemetryChunk(year, round, 0, requestId);
+                });
             })
             .catch(function (err) {
-                alert("Failed to load race data: " + err.message);
+                if (requestId !== activeReplayRequest) return;
+                var msg = err.name === "AbortError"
+                    ? "Session data request timed out. Please check your connection and try again."
+                    : "Failed to load session data: " + err.message;
+                alert(msg);
                 sessionModal.style.display = "";
                 hideLoader();
+            });
+    }
+
+    function loadTelemetryChunk(year, round, chunkIndex, requestId) {
+        if (requestId !== activeReplayRequest) return;
+
+        updateTelemetryLoader(chunkIndex, telemetryTotalChunks);
+
+        fetchJSON("/api/replay/telemetry?year=" + year + "&round=" + round + "&session=R&chunk=" + chunkIndex, 30000)
+            .then(function (result) {
+                if (requestId !== activeReplayRequest) return;
+                var chunkData = result.data || {};
+
+                if (result.status === 202 || chunkData.status === "queued" || chunkData.status === "running") {
+                    showLoader(chunkData.message || "Fetching detailed telemetry...");
+                    setTimeout(function () {
+                        loadTelemetryChunk(year, round, chunkIndex, requestId);
+                    }, chunkData.retryAfterMs || 2500);
+                    return;
+                }
+
+                if (!result.ok || chunkData.error) {
+                    alert(chunkData.message || ("Error loading telemetry: " + (chunkData.error || result.status)));
+                    if (chunkIndex === 0) {
+                        sessionModal.style.display = "";
+                        hideLoader();
+                    }
+                    return;
+                }
+
+                telemetryTotalChunks = chunkData.totalChunks || telemetryTotalChunks || 1;
+                telemetryLoadedChunks = Math.max(telemetryLoadedChunks, chunkIndex + 1);
+                updateTelemetryLoader(chunkIndex, telemetryTotalChunks);
+
+                if (chunkIndex === 0) {
+                    raceData.track = chunkData.track;
+                    raceData.drsZones = chunkData.drsZones;
+                    raceData.drivers = chunkData.drivers;
+                    raceData.sessionInfo = chunkData.sessionInfo;
+                    raceData.totalLaps = chunkData.totalLaps;
+                    raceData.totalFrames = chunkData.totalFrames || (chunkData.frames || []).length;
+                    raceData.dt = chunkData.dt;
+                    raceData.sampleRate = chunkData.sampleRate;
+                    raceData.raceControlMessages = chunkData.raceControlMessages || [];
+                    raceData.frames = chunkData.frames || [];
+
+                    initReplay();
+                    showStartReplayLoader("Loading telemetry chunk 1/" + telemetryTotalChunks + "...");
+                } else {
+                    raceData.frames = raceData.frames.concat(chunkData.frames || []);
+                    if (worker) {
+                        worker.postMessage({ type: "append_frames", frames: chunkData.frames || [] });
+                    }
+                    updateUI();
+                    renderFrame();
+                }
+
+                if (chunkData.hasMore || chunkIndex + 1 < telemetryTotalChunks) {
+                    setTimeout(function () {
+                        loadTelemetryChunk(year, round, chunkIndex + 1, requestId);
+                    }, 0);
+                } else {
+                    telemetryLoadDone = true;
+                    if (!replayStarted && loadingOverlay.classList.contains("show")) {
+                        showStartReplayLoader("Replay ready. " + telemetryTotalChunks + "/" + telemetryTotalChunks + " chunks loaded.");
+                    }
+                }
+            })
+            .catch(function (err) {
+                console.error("Failed to load chunk " + chunkIndex, err);
+                if (requestId !== activeReplayRequest) return;
+                if (chunkIndex === 0) {
+                    var msg = err.name === "AbortError"
+                        ? "Detailed telemetry is taking too long to respond. The server may still be preparing it; please try again in a moment."
+                        : "Failed to prepare replay: " + err.message;
+                    alert(msg);
+                    sessionModal.style.display = "";
+                    hideLoader();
+                }
             });
     }
 
@@ -170,18 +338,21 @@
         eventTitle.textContent = raceData.eventName + " " + raceData.year;
         progressLapEnd.textContent = "Lap " + raceData.totalLaps;
 
-        computeTrackBounds();
-        resizeCanvas();
-
         currentFrame = 0;
         isPlaying = false;
         selectedDrivers.clear();
+        lastInsightDrivers = "";
         driverCurrentPos = {};
         driverTargetPos = {};
+
+        computeTrackBounds();
 
         if (worker) {
             worker.postMessage({ type: "init_data", raceData: raceData });
         }
+
+        resizeCanvas();
+        updatePlayPauseIcon();
 
         // Setup Session Banner
         if (raceData.sessionInfo) {
@@ -608,11 +779,15 @@
     }
 
     function advanceFrame() {
-        if (!raceData || !raceData.frames) return;
+        if (!raceData || !raceData.frames || raceData.frames.length === 0) return;
         currentFrame++;
         if (currentFrame >= raceData.frames.length) {
             currentFrame = raceData.frames.length - 1;
-            pause();
+            if (telemetryLoadDone) {
+                pause();
+            } else {
+                frameAccumulator = 0;
+            }
         }
         updateUI();
     }
@@ -674,16 +849,18 @@
     }
 
     function updateUI() {
-        if (!raceData || !raceData.frames) return;
+        if (!raceData || !raceData.frames || raceData.frames.length === 0) return;
 
         var frame = raceData.frames[currentFrame];
+        if (!frame) return;
         var lap = frame ? frame.lap : 0;
         var totalLaps = raceData.totalLaps;
 
         currentLapEl.textContent = lap + "/" + totalLaps;
 
-        var progress = raceData.frames.length > 1
-            ? (currentFrame / (raceData.frames.length - 1)) * 100
+        var progressTotal = raceData.totalFrames || raceData.frames.length;
+        var progress = progressTotal > 1
+            ? (currentFrame / (progressTotal - 1)) * 100
             : 0;
         progressFill.style.width = progress + "%";
         progressThumb.style.left = progress + "%";

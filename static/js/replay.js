@@ -27,6 +27,14 @@
     var speedLabel = document.getElementById("speedLabel");
     var playIcon = document.getElementById("playIcon");
     var pauseIcon = document.getElementById("pauseIcon");
+    var raceTabs = document.querySelectorAll(".race-tab");
+    var raceTabPanels = document.querySelectorAll(".race-tab-panel");
+    var currentReplayYear = 2024;
+    var currentReplayRound = 1;
+    var currentSampleRate = 5;
+    var comparisonCharts = {};
+    var analysisCharts = {};
+    var liveTimer = null;
 
     var raceData = null;
     var currentFrame = 0;
@@ -91,8 +99,102 @@
         });
         setupControls();
         setupKeyboard();
+        setupRaceWorkspace();
+        loadRecentRaces();
+        pollLiveMode();
         resizeCanvas();
         window.addEventListener("resize", resizeCanvas);
+    }
+
+    function setupRaceWorkspace() {
+        raceTabs.forEach(function (tab) {
+            tab.addEventListener("click", function () {
+                activateRaceTab(tab.dataset.raceTab);
+            });
+        });
+
+        var modalBtn = document.getElementById("btnOpenSessionModal");
+        if (modalBtn) {
+            modalBtn.addEventListener("click", function () {
+                sessionModal.style.display = "flex";
+            });
+        }
+
+        document.querySelectorAll(".mini-race-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                startReplay(parseInt(btn.dataset.year), parseInt(btn.dataset.round));
+            });
+        });
+
+        var cmpBtn = document.getElementById("btnLoadComparison");
+        if (cmpBtn) cmpBtn.addEventListener("click", loadComparison);
+
+        var analysisBtn = document.getElementById("btnLoadAnalysis");
+        if (analysisBtn) analysisBtn.addEventListener("click", loadAnalysis);
+
+        var resBtn = document.getElementById("btnResolutionToggle");
+        if (resBtn) {
+            resBtn.addEventListener("click", function () {
+                currentSampleRate = currentSampleRate === 1 ? 5 : 1;
+                resBtn.textContent = currentSampleRate === 1 ? "FULL" : "SR";
+                if (currentReplayYear && currentReplayRound) {
+                    showLoader(currentSampleRate === 1 ? "Loading full telemetry..." : "Loading sampled telemetry...");
+                    activeReplayRequest++;
+                    telemetryLoadDone = false;
+                    raceData.frames = [];
+                    currentFrame = 0;
+                    loadTelemetryChunk(currentReplayYear, currentReplayRound, 0, activeReplayRequest);
+                }
+            });
+        }
+    }
+
+    function activateRaceTab(name) {
+        raceTabs.forEach(function (tab) {
+            tab.classList.toggle("active", tab.dataset.raceTab === name);
+        });
+        raceTabPanels.forEach(function (panel) {
+            panel.classList.remove("active");
+        });
+        var target = document.getElementById("raceTab" + name.charAt(0).toUpperCase() + name.slice(1));
+        if (target) target.classList.add("active");
+        replayContainer.style.display = name === "replay" && raceData ? "" : "none";
+    }
+
+    function updateOverview(data) {
+        if (!data) return;
+        document.getElementById("overviewTitle").textContent = (data.eventName || "Race") + " " + (data.year || currentReplayYear);
+        document.getElementById("overviewMeta").textContent = (data.country || "") + " | Round " + (data.round || currentReplayRound);
+        document.getElementById("ovWinner").textContent = data.winner || "Pending";
+        document.getElementById("ovFastest").textContent = data.fastestLap || "Pending";
+        document.getElementById("ovPole").textContent = data.pole || "Pending";
+        document.getElementById("ovGap").textContent = data.gap || "Pending";
+    }
+
+    function loadOverview(year, round) {
+        fetchJSON("/api/race/overview?year=" + year + "&round=" + round, 12000)
+            .then(function (result) {
+                updateOverview(result.data || {});
+            })
+            .catch(function () {});
+    }
+
+    function loadRecentRaces() {
+        fetchJSON("/api/replay/sessions?year=2024", 12000)
+            .then(function (result) {
+                var list = document.getElementById("recentRacesList");
+                if (!list) return;
+                var events = (result.data && result.data.events || []).slice(0, 6);
+                list.innerHTML = events.map(function (ev) {
+                    return '<button class="mini-race-btn" data-year="2024" data-round="' + ev.round + '">R' + ev.round + " " + ev.name + "</button>";
+                }).join("");
+                list.querySelectorAll(".mini-race-btn").forEach(function (btn) {
+                    btn.addEventListener("click", function () {
+                        startReplay(parseInt(btn.dataset.year), parseInt(btn.dataset.round));
+                    });
+                });
+            })
+            .catch(function () {});
     }
 
     function showLoader(text) {
@@ -204,6 +306,8 @@
 
     function startReplay(year, round) {
         var requestId = ++activeReplayRequest;
+        currentReplayYear = year;
+        currentReplayRound = round;
         pause();
         replayStarted = false;
         telemetryLoadDone = false;
@@ -212,7 +316,9 @@
         currentFrame = 0;
 
         sessionModal.style.display = "none";
+        activateRaceTab("overview");
         showLoader("Loading session data...");
+        loadOverview(year, round);
 
         fetchJSON("/api/replay/basic?year=" + year + "&round=" + round + "&session=R", 15000)
             .then(function (result) {
@@ -228,6 +334,16 @@
                 raceData = basicData;
                 raceData.frames = [];
                 raceData.totalFrames = 0;
+                updateOverview({
+                    year: year,
+                    round: round,
+                    eventName: basicData.eventName,
+                    country: basicData.sessionInfo && basicData.sessionInfo.country,
+                    winner: "Load telemetry",
+                    fastestLap: "Load telemetry",
+                    pole: "Load telemetry",
+                    gap: "Load telemetry"
+                });
                 replayContainer.style.display = "";
                 eventTitle.textContent = raceData.eventName + " " + raceData.year;
                 currentLapEl.textContent = "-/" + (raceData.sessionInfo.totalLaps || "-");
@@ -239,6 +355,7 @@
                     '</div>';
 
                 showActionLoader("Session data ready.", "Load Full Telemetry", function () {
+                    activateRaceTab("replay");
                     showLoader("Fetching detailed telemetry...");
                     loadTelemetryChunk(year, round, 0, requestId);
                 });
@@ -259,7 +376,7 @@
 
         updateTelemetryLoader(chunkIndex, telemetryTotalChunks);
 
-        fetchJSON("/api/replay/telemetry?year=" + year + "&round=" + round + "&session=R&chunk=" + chunkIndex, 30000)
+        fetchJSON("/api/replay/telemetry?year=" + year + "&round=" + round + "&session=R&sample_rate=" + currentSampleRate + "&chunk=" + chunkIndex, 30000)
             .then(function (result) {
                 if (requestId !== activeReplayRequest) return;
                 var chunkData = result.data || {};
@@ -298,6 +415,8 @@
                     raceData.frames = chunkData.frames || [];
 
                     initReplay();
+                    loadComparison();
+                    loadAnalysis();
                     showStartReplayLoader("Loading telemetry chunk 1/" + telemetryTotalChunks + "...");
                 } else {
                     raceData.frames = raceData.frames.concat(chunkData.frames || []);
@@ -928,8 +1047,141 @@
     }
 
     function updateSpeedDisplay() {
-        speedLabel.textContent = speed + "x";
+        if (speedLabel) speedLabel.textContent = speed + "x";
         playbackSpeedEl.textContent = speed + "x";
+    }
+
+    function chartDataFromTrace(trace, key) {
+        return trace.distance.map(function (d, i) {
+            return { x: d, y: trace[key][i] || 0 };
+        });
+    }
+
+    function upsertLineChart(id, datasets, yTitle) {
+        var canvas = document.getElementById(id);
+        if (!canvas) return;
+        if (comparisonCharts[id]) comparisonCharts[id].destroy();
+        comparisonCharts[id] = new Chart(canvas, {
+            type: "line",
+            data: { datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                elements: { point: { radius: 0 }, line: { borderWidth: 1.7 } },
+                parsing: false,
+                plugins: { legend: { labels: { usePointStyle: true, pointStyle: "circle" } } },
+                scales: {
+                    x: { type: "linear", title: { display: true, text: "Distance (m)" } },
+                    y: { title: { display: true, text: yTitle }, grid: { color: "rgba(255,255,255,0.05)" } }
+                }
+            }
+        });
+    }
+
+    function loadComparison() {
+        var d1 = document.getElementById("cmpD1").value;
+        var d2 = document.getElementById("cmpD2").value;
+        var d3 = document.getElementById("cmpD3").value;
+        var drivers = [d1, d2];
+        if (d3) drivers.push(d3);
+
+        fetchJSON("/api/race/comparison?year=" + currentReplayYear + "&round=" + currentReplayRound + "&session=R&drivers=" + drivers.join(","), 45000)
+            .then(function (result) {
+                var data = result.data || {};
+                if (data.error || !data.traces) return;
+                var speedSets = [];
+                var throttleSets = [];
+                var brakeSets = [];
+                var deltaSets = [];
+                var colors = ["#e10600", "#00d2ff", "#ffc906"];
+                data.drivers.forEach(function (drv, idx) {
+                    var trace = data.traces[drv];
+                    speedSets.push({ label: drv, data: chartDataFromTrace(trace, "speed"), borderColor: colors[idx], backgroundColor: "transparent" });
+                    throttleSets.push({ label: drv, data: chartDataFromTrace(trace, "throttle"), borderColor: colors[idx], backgroundColor: "transparent" });
+                    brakeSets.push({ label: drv, data: chartDataFromTrace(trace, "brake"), borderColor: colors[idx], backgroundColor: "transparent" });
+                    if (data.delta[drv]) {
+                        deltaSets.push({
+                            label: drv,
+                            data: data.traces[data.referenceDriver].distance.map(function (dist, i) { return { x: dist, y: data.delta[drv][i] || 0 }; }),
+                            borderColor: colors[idx],
+                            backgroundColor: "transparent"
+                        });
+                    }
+                });
+                upsertLineChart("cmpSpeedChart", speedSets, "km/h");
+                upsertLineChart("cmpThrottleChart", throttleSets, "%");
+                upsertLineChart("cmpBrakeChart", brakeSets, "Brake");
+                upsertLineChart("cmpDeltaChart", deltaSets, "Delta (s)");
+            })
+            .catch(function (err) { console.error("Comparison failed", err); });
+    }
+
+    function loadAnalysis() {
+        fetchJSON("/api/race/analysis?year=" + currentReplayYear + "&round=" + currentReplayRound, 45000)
+            .then(function (result) {
+                var data = result.data || {};
+                if (data.error) return;
+                var sectorLabels = Object.keys(data.sectorBreakdown || {});
+                var sectors = data.sectorBreakdown || {};
+                renderAnalysisChart("sectorChart", "bar", {
+                    labels: sectorLabels,
+                    datasets: [
+                        { label: "S1", data: sectorLabels.map(function (d) { return sectors[d].sector1; }), backgroundColor: "#e10600" },
+                        { label: "S2", data: sectorLabels.map(function (d) { return sectors[d].sector2; }), backgroundColor: "#00d2ff" },
+                        { label: "S3", data: sectorLabels.map(function (d) { return sectors[d].sector3; }), backgroundColor: "#ffc906" }
+                    ]
+                });
+                var compounds = data.compoundUsage || {};
+                renderAnalysisChart("compoundChart", "doughnut", {
+                    labels: Object.keys(compounds),
+                    datasets: [{ data: Object.keys(compounds).map(function (k) { return compounds[k]; }), backgroundColor: ["#e10600", "#ffc906", "#f0f0f0", "#43b02a", "#0072c6"] }]
+                });
+            })
+            .catch(function (err) { console.error("Analysis failed", err); });
+    }
+
+    function renderAnalysisChart(id, type, data) {
+        var canvas = document.getElementById(id);
+        if (!canvas) return;
+        if (analysisCharts[id]) analysisCharts[id].destroy();
+        analysisCharts[id] = new Chart(canvas, {
+            type: type,
+            data: data,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                plugins: { legend: { position: "bottom" } },
+                scales: type === "bar" ? { y: { beginAtZero: true } } : {}
+            }
+        });
+    }
+
+    function pollLiveMode() {
+        fetchJSON("/api/race/live/status", 10000)
+            .then(function (result) {
+                var status = result.data || {};
+                document.getElementById("liveStatus").textContent = status.live ? "ON" : "SIM";
+                document.getElementById("liveBanner").textContent = status.message || "Live mode ready";
+            })
+            .catch(function () {});
+        loadLiveSnapshot();
+        if (liveTimer) clearInterval(liveTimer);
+        liveTimer = setInterval(loadLiveSnapshot, 5000);
+    }
+
+    function loadLiveSnapshot() {
+        fetchJSON("/api/race/live/snapshot", 10000)
+            .then(function (result) {
+                var rows = result.data && result.data.leaderboard || [];
+                var target = document.getElementById("liveLeaderboard");
+                if (!target) return;
+                target.innerHTML = rows.map(function (row) {
+                    return '<div class="live-row"><span>P' + row.position + '</span><strong>' + row.driver + '</strong><em>' + row.gap + '</em><b>' + row.speed + ' km/h</b></div>';
+                }).join("");
+            })
+            .catch(function () {});
     }
 
     function setupControls() {

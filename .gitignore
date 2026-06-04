@@ -20,6 +20,7 @@ fastf1_cache/*
 precomputed/*
 !precomputed/.gitkeep
 cache/
+tmp_f1_replay/
 
 # IDE
 .vscode/

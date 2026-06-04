@@ -161,6 +161,14 @@ document.querySelectorAll(".tab-btn").forEach(function (btn) {
     });
 });
 
+fetch("/api/race/live/status")
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+        var live = getEl("homeLiveStatus");
+        if (live) live.textContent = data.live ? "Live Session Active" : "Simulation Ready";
+    })
+    .catch(function () {});
+
 
 function loadPart1() {
     showLoader("Loading race data...");

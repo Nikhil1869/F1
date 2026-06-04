@@ -215,6 +215,60 @@ body {
     padding: 0 20px 60px;
 }
 
+.home-fastlane {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 14px;
+    margin: 0 0 22px;
+}
+
+.home-live-card,
+.home-race-group {
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-xs);
+    background: var(--bg-card);
+    padding: 16px;
+}
+
+.home-live-card span,
+.home-race-group h3 {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.home-live-card strong {
+    color: #00e676;
+    font-size: 1.35rem;
+    text-transform: uppercase;
+}
+
+.home-race-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.home-race-links a {
+    color: var(--text-primary);
+    text-decoration: none;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-xs);
+    background: var(--bg-secondary);
+    padding: 7px 10px;
+    font-weight: 700;
+    transition: var(--transition);
+}
+
+.home-race-links a:hover {
+    border-color: var(--f1-red);
+    color: #fff;
+}
+
 .tab-panel {
     display: none;
     animation: fadeInUp 0.35s ease-out;

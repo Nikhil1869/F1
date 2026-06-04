@@ -1,5 +1,6 @@
 import os
 import threading
+import logging
 from flask import Flask, render_template, redirect, url_for
 from flask_login import login_required
 from config import Config, CACHE_DIR
@@ -19,9 +20,17 @@ from routes.auth_routes import auth_bp
 from routes.h2h_routes import h2h_bp
 from routes.laptimes_routes import laptimes_bp
 from routes.calendar_routes import calendar_bp
+from routes.race_routes import race_bp
+
+try:
+    from flask_socketio import SocketIO
+except Exception:
+    SocketIO = None
 
 app = Flask(__name__)
 app.config.from_object(Config)
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+socketio = SocketIO(app, cors_allowed_origins="*") if SocketIO else None
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(basedir, "f1lab.db")
@@ -41,6 +50,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(h2h_bp)
 app.register_blueprint(laptimes_bp)
 app.register_blueprint(calendar_bp)
+app.register_blueprint(race_bp)
 
 with app.app_context():
     db.create_all()
@@ -89,5 +99,7 @@ def register_page():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, threaded=True)
-
+    if socketio:
+        socketio.run(app, debug=True, port=5000, allow_unsafe_werkzeug=True)
+    else:
+        app.run(debug=True, port=5000, threaded=True)

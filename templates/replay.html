@@ -26,6 +26,10 @@
             <h1 id="eventTitle">Loading Race Data...</h1>
         </div>
         <div class="topbar-meta">
+            <div class="meta-item live-meta" id="liveMeta">
+                <span class="meta-label">LIVE</span>
+                <span class="meta-value" id="liveStatus">SIM</span>
+            </div>
             <div class="meta-item" id="lapDisplay">
                 <span class="meta-label">LAP</span>
                 <span class="meta-value" id="currentLap">-/-</span>
@@ -36,6 +40,13 @@
             </div>
         </div>
     </div>
+
+    <nav class="race-tabs" id="raceTabs">
+        <button class="race-tab active" data-race-tab="overview" type="button">Overview</button>
+        <button class="race-tab" data-race-tab="replay" type="button">Telemetry Replay</button>
+        <button class="race-tab" data-race-tab="comparison" type="button">Comparison</button>
+        <button class="race-tab" data-race-tab="analysis" type="button">Analysis</button>
+    </nav>
 
         <div class="session-modal" id="sessionModal">
         <div class="session-modal-content glass-card">
@@ -60,7 +71,42 @@
         </div>
     </div>
 
+    <section class="race-tab-panel active race-overview" id="raceTabOverview">
+        <div class="race-shell">
+            <div class="overview-header">
+                <div>
+                    <span class="topbar-badge">RACE CENTER</span>
+                    <h2 id="overviewTitle">Select a race to begin</h2>
+                    <p id="overviewMeta">Fast OpenF1 data appears first; detailed FastF1 telemetry loads only when requested.</p>
+                </div>
+                <button class="btn-primary" id="btnOpenSessionModal" type="button">Select Race</button>
+            </div>
+            <div class="overview-grid">
+                <div class="overview-card"><span>Winner</span><strong id="ovWinner">-</strong></div>
+                <div class="overview-card"><span>Fastest Lap</span><strong id="ovFastest">-</strong></div>
+                <div class="overview-card"><span>Pole</span><strong id="ovPole">-</strong></div>
+                <div class="overview-card"><span>Gap</span><strong id="ovGap">-</strong></div>
+            </div>
+            <div class="overview-split">
+                <div class="glass-card race-list-card">
+                    <h3>Recent Races</h3>
+                    <div id="recentRacesList" class="mini-race-list"></div>
+                </div>
+                <div class="glass-card race-list-card">
+                    <h3>Popular Battles</h3>
+                    <div class="popular-races">
+                        <button class="mini-race-btn" data-year="2024" data-round="1">2024 Bahrain</button>
+                        <button class="mini-race-btn" data-year="2024" data-round="2">2024 Saudi Arabia</button>
+                        <button class="mini-race-btn" data-year="2023" data-round="6">2023 Monaco</button>
+                        <button class="mini-race-btn" data-year="2023" data-round="14">2023 Netherlands</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
         <div class="replay-container" id="replayContainer" style="display:none;">
+        <section class="race-tab-panel" id="raceTabReplay">
         <div class="replay-layout">
                         <aside class="leaderboard-panel" id="leaderboardPanel">
                 <div class="leaderboard-header">
@@ -153,6 +199,7 @@
                         <input type="checkbox" id="telemetryToggle" style="accent-color: #e10600;">
                         <span class="toggle-label">Telemetry</span>
                     </label>
+                    <button class="ctrl-btn" id="btnResolutionToggle" title="Toggle sampled/full telemetry">SR</button>
                 </div>
             </div>
 
@@ -174,7 +221,46 @@
                 </div>
             </aside>
         </div>
+        </section>
     </div>
+
+    <section class="race-tab-panel race-tools" id="raceTabComparison">
+        <div class="race-shell">
+            <div class="tool-header">
+                <h2>Driver Comparison</h2>
+                <div class="tool-controls">
+                    <select id="cmpD1" class="f1-select"><option>VER</option><option>NOR</option><option>LEC</option><option>PIA</option><option>HAM</option><option>RUS</option><option>SAI</option></select>
+                    <select id="cmpD2" class="f1-select"><option>NOR</option><option>VER</option><option>LEC</option><option>PIA</option><option>HAM</option><option>RUS</option><option>SAI</option></select>
+                    <select id="cmpD3" class="f1-select"><option value="">Optional third</option><option>LEC</option><option>PIA</option><option>SAI</option><option>HAM</option><option>RUS</option></select>
+                    <button class="btn-primary" id="btnLoadComparison" type="button">Compare</button>
+                </div>
+            </div>
+            <div class="comparison-grid">
+                <div class="glass-card chart-card"><h3>Speed</h3><div class="chart-container"><canvas id="cmpSpeedChart"></canvas></div></div>
+                <div class="glass-card chart-card"><h3>Throttle</h3><div class="chart-container"><canvas id="cmpThrottleChart"></canvas></div></div>
+                <div class="glass-card chart-card"><h3>Brake</h3><div class="chart-container"><canvas id="cmpBrakeChart"></canvas></div></div>
+                <div class="glass-card chart-card"><h3>Delta</h3><div class="chart-container"><canvas id="cmpDeltaChart"></canvas></div></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="race-tab-panel race-tools" id="raceTabAnalysis">
+        <div class="race-shell">
+            <div class="tool-header">
+                <h2>Analysis & Live Mode</h2>
+                <button class="btn-primary" id="btnLoadAnalysis" type="button">Refresh Analysis</button>
+            </div>
+            <div class="analysis-grid">
+                <div class="glass-card chart-card"><h3>Sector Breakdown</h3><div class="chart-container"><canvas id="sectorChart"></canvas></div></div>
+                <div class="glass-card chart-card"><h3>Compound Usage</h3><div class="chart-container"><canvas id="compoundChart"></canvas></div></div>
+                <div class="glass-card live-card">
+                    <h3>Live Dashboard</h3>
+                    <div id="liveBanner" class="live-banner">Simulated live mode ready</div>
+                    <div id="liveLeaderboard" class="live-leaderboard"></div>
+                </div>
+            </div>
+        </div>
+    </section>
 
         <div class="legend-overlay" id="legendOverlay" style="display:none;">
         <div class="legend-card glass-card">

@@ -1,124 +1,92 @@
-# F1 Data Lab & Race Replay
+# F1 Data Lab
 
-Interactive Formula 1 data analysis platform with telemetry visualization, ML-based podium predictions, a chatbot-style race engineer, and a fully interactive 2D race replay engine.
+Modern Formula 1 analytics app with fast OpenF1-backed session data, cached FastF1 telemetry, lazy race replay loading, driver comparison charts, ML predictions, and a simulated live dashboard.
 
-![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
-![Flask](https://img.shields.io/badge/flask-3.x-green.svg)
-![License](https://img.shields.io/badge/license-MIT-yellow.svg)
+## Tech Stack
 
-## What it does
+- Backend: Flask, Flask-Login, Flask-SQLAlchemy, optional Flask-SocketIO
+- Data: OpenF1 for fast public session/results data, FastF1 for detailed telemetry
+- ML: scikit-learn, XGBoost
+- Frontend: HTML, CSS, vanilla JavaScript, Chart.js, Canvas/Web Worker replay
+- Deployment: Docker, Render/Railway-ready process files
 
-- **Race Data Analysis** — Pull constructor and driver standings from any race using the FastF1 API
-- **Telemetry Comparison** — Overlay speed, throttle, and brake traces for two drivers from qualifying
-- **ML Podium Prediction (Baseline)** — Random Forest trained on season data to predict podium finishes
-- **ML Podium Prediction (Advanced)** — Adds cumulative driver form + hyperparameter tuning via GridSearchCV
-- **AI Race Engineer** — Chat interface to query race winners, fastest laps, and standings from historical data
-- **Interactive Race Replay** — 2D visualization of any race session with real-time driver positions, telemetry streaming, dynamic leaderboards, and safety car tracking
+## Highlights
 
-## Project structure
+- Replay page loads basic race metadata first, then loads telemetry only on demand.
+- Telemetry is sampled, chunked, cached in `fastf1_cache/`, and precomputed into `precomputed/`.
+- Race workspace tabs: Overview, Telemetry Replay, Comparison, Analysis.
+- Comparison supports 2-3 drivers with speed, throttle, brake, and delta charts.
+- Analysis tab includes sector breakdown, compound usage, and simulated live leaderboard.
+- Session list, basic results, calendar, and driver lists prefer OpenF1 for speed with FastF1 fallback.
 
-```
-f1/
-├── app.py                          # Main Flask application entry point
-├── config.py                       # Shared configuration and environment settings
-├── requirements.txt
-├── routes/                         # API Blueprints
-│   ├── data_routes.py              # Baseline data routes
-│   ├── ml_routes.py                # Machine learning prediction routes
-│   ├── chat_routes.py              # AI Race Engineer routes
-│   └── replay_routes.py            # Race replay and telemetry routes
-├── templates/
-│   ├── index.html                  # Main F1 Data Lab dashboard
-│   └── replay.html                 # Interactive Race Replay viewer
-├── static/
-│   ├── css/
-│   │   ├── style.css               # Main dashboard styling
-│   │   └── replay.css              # Replay engine styling
-│   └── js/
-│       ├── app.js                  # Main dashboard logic
-│       └── replay.js               # Replay rendering and playback logic
-├── part_1_pandas/
-│   └── 01_f1_data_basics.py        # Standalone script — data loading & bar chart
-├── part_2_fastf1/
-│   └── 02_telemetry.py             # Standalone script — qualifying telemetry plot
-├── part_3_ml_baseline/
-│   └── 03_ml_model.py              # Standalone script — baseline Random Forest
-├── part_4_ml_advanced/
-│   └── 04_ml_advanced.py           # Standalone script — tuned RF + feature engineering
-├── part_5_ai_engineer/
-│   └── 05_ai_race_engineer.py      # Standalone script — chatbot skeleton
-└── fastf1_cache/                   # Cached telemetry data (ignored in git)
-```
-
-## Getting started
-
-### Prerequisites
-
-- Python 3.9 or higher
-- pip
-
-### Installation
+## Local Setup
 
 ```bash
-git clone https://github.com/Nikhil1869/F1.git
-cd F1
-
 python -m venv venv
-
-# Windows
 venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
-
 pip install -r requirements.txt
-```
-
-### Running the web app
-
-Create an `.env` file based on `.env.example` to unlock the AI Engineer functionalities.
-
-```bash
 python app.py
 ```
 
-Open [http://localhost:5000](http://localhost:5000) in your browser. From there, you can explore the F1 Data Lab or launch the new **Race Replay** interface.
+Open `http://localhost:5000`.
 
-> **Note:** The first load of any race or qualifying session takes a minute or two while FastF1 downloads and caches the required telemetry data. Subsequent loads are significantly faster.
+The first detailed telemetry build can take time while FastF1 fills the disk cache. Repeat loads are much faster.
 
-### Running the standalone scripts
-
-Each `part_*` folder contains a self-contained script you can run independently:
+## Docker
 
 ```bash
-python part_1_pandas/01_f1_data_basics.py
-python part_2_fastf1/02_telemetry.py
-python part_3_ml_baseline/03_ml_model.py
-python part_4_ml_advanced/04_ml_advanced.py
-python part_5_ai_engineer/05_ai_race_engineer.py
+docker build -t f1-data-lab .
+docker run -p 5000:5000 f1-data-lab
 ```
 
-## Tech stack
+## Environment
 
-| Layer     | Tools                                        |
-|-----------|----------------------------------------------|
-| Data      | [FastF1](https://github.com/theOehrly/Fast-F1), pandas, numpy |
-| ML        | scikit-learn (RandomForestClassifier, GridSearchCV) |
-| Backend   | Flask (Blueprints)                           |
-| Frontend  | Vanilla JS, Chart.js, HTML5 Canvas, CSS      |
-| Plots     | matplotlib, seaborn (standalone scripts)     |
+```env
+FLASK_APP=app.py
+FLASK_ENV=production
+SECRET_KEY=change-me
+OPENF1_BASE_URL=https://api.openf1.org/v1
+OPENF1_TIMEOUT=10
+DATA_SOURCE_PREFER=auto
+```
 
-## API endpoints
+## Core API
 
-| Method | Route                       | Description                        |
-|--------|-----------------------------|------------------------------------|
-| GET    | `/api/part1/team-points`    | Constructor + driver points        |
-| GET    | `/api/part2/telemetry`      | Speed/throttle/brake telemetry     |
-| GET    | `/api/part3/predict`        | Baseline ML predictions            |
-| GET    | `/api/part4/predict-advanced` | Advanced ML predictions          |
-| POST   | `/api/part5/chat`           | AI Race Engineer chat              |
-| GET    | `/api/replay/sessions`      | List available replay sessions     |
-| GET    | `/api/replay/load`          | Load full race telemetry and track |
+- `GET /api/replay/basic` - fast OpenF1 replay metadata
+- `GET /api/replay/telemetry` - sampled chunked FastF1 telemetry
+- `GET /api/race/overview` - race summary
+- `GET /api/race/comparison` - 2-3 driver telemetry comparison
+- `GET /api/race/analysis` - sector and compound analysis
+- `GET /api/race/live/status` - live/simulation state
+- `GET /api/race/live/snapshot` - simulated live leaderboard
 
-## License
+## Deployment
 
-MIT — see [LICENSE](LICENSE) for details.
+Render and Railway can run the app with:
+
+```bash
+gunicorn app:app
+```
+
+For SocketIO/eventlet deployments, use:
+
+```bash
+gunicorn --worker-class eventlet -w 1 app:app
+```
+
+## Project Layout
+
+```text
+app.py
+config.py
+routes/
+services/
+static/
+templates/
+precomputed/
+fastf1_cache/
+```
+
+## Notes
+
+Learning scripts were archived onto `codex/learning-folders-archive` before cleanup from the active branch.

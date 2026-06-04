@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: f1-data-lab
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: OPENF1_BASE_URL
+        value: https://api.openf1.org/v1
+      - key: DATA_SOURCE_PREFER
+        value: auto

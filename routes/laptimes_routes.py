@@ -1,11 +1,12 @@
 import warnings
 
-import fastf1
 import numpy as np
 import pandas as pd
 from flask import Blueprint, jsonify, request
 
-from routes.data_routes import get_session, get_cached_result, save_cached_result
+from services.fastf1_service import get_session
+from services.data_provider import provider
+from services.cache_service import get_cached_result, save_cached_result
 
 warnings.filterwarnings("ignore")
 
@@ -29,20 +30,26 @@ def available_sessions():
     """List available race sessions for lap time analysis."""
     year = request.args.get("year", 2024, type=int)
     try:
-        schedule = fastf1.get_event_schedule(year)
-        events = []
+        # OpenF1-first via DataProvider (instant, no FastF1 loading)
+        events = provider.get_session_list(year, completed_only=True)
+        if events:
+            return jsonify({"year": year, "events": events})
+
+        # Fallback: FastF1 schedule
+        schedule = provider.get_event_schedule(year)
+        fallback_events = []
         for _, row in schedule.iterrows():
             if row["EventFormat"] == "testing":
                 continue
             if row["EventDate"] > pd.Timestamp.now():
                 continue
-            events.append({
+            fallback_events.append({
                 "round": int(row["RoundNumber"]),
                 "name": row["EventName"],
                 "country": row.get("Country", ""),
                 "date": str(row.get("EventDate", "")),
             })
-        return jsonify({"year": year, "events": events})
+        return jsonify({"year": year, "events": fallback_events})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

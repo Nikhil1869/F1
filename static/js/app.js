@@ -18,10 +18,36 @@ function getEl(id) {
 var _loaderTimer = null;
 var _loaderStart = 0;
 
-function showLoader() {
+function showLoader(message) {
     var overlay = getEl("loadingOverlay");
+    if (_loaderTimer) {
+        clearInterval(_loaderTimer);
+        _loaderTimer = null;
+    }
     overlay.classList.add("show");
     _loaderStart = Date.now();
+
+    // Update the main message
+    var msgEl = overlay.querySelector(".loader-msg");
+    if (!msgEl) {
+        msgEl = document.createElement("p");
+        msgEl.className = "loader-msg";
+        overlay.insertBefore(msgEl, overlay.querySelector(".loader-elapsed"));
+    }
+    msgEl.textContent = message || "Crunching F1 data...";
+
+    // Show first-load warning if nothing is cached yet
+    var warnEl = overlay.querySelector(".loader-warn");
+    if (!warnEl) {
+        warnEl = document.createElement("p");
+        warnEl.className = "loader-warn";
+        warnEl.style.cssText = "font-size:0.75rem;color:rgba(255,200,100,0.7);margin-top:4px;";
+        overlay.appendChild(warnEl);
+    }
+    var hasAnyCached = sessionStorage.length > 0;
+    warnEl.textContent = hasAnyCached ? "" : "First uncached telemetry or ML load may take 40-60 seconds...";
+
+    // Elapsed timer
     var timerEl = overlay.querySelector(".loader-elapsed");
     if (!timerEl) {
         timerEl = document.createElement("p");
@@ -93,7 +119,7 @@ function fetchJSON(url, opts) {
     _activeController = new AbortController();
     var timeoutId = setTimeout(function() {
         if (_activeController) _activeController.abort("Timeout");
-    }, 30000); // 30 second timeout
+    }, 90000); // 90 second timeout (ML routes can take 40-60s on first load)
     opts.signal = _activeController.signal;
 
     return fetch(url, opts).then(function (res) {
@@ -137,7 +163,7 @@ document.querySelectorAll(".tab-btn").forEach(function (btn) {
 
 
 function loadPart1() {
-    showLoader();
+    showLoader("Loading race data...");
     fetchJSON("/api/data/team-points")
         .then(function (data) {
             var teamLabels = data.teams.map(function (t) { return t.TeamName; });
@@ -203,82 +229,99 @@ function loadPart1() {
 }
 
 
+function _renderTelemetryCharts(data) {
+    var dist1 = data.tel1.distance;
+    var dist2 = data.tel2.distance;
+
+    ["speed", "throttle", "brake"].forEach(function (k) {
+        if (charts[k]) { charts[k].destroy(); charts[k] = null; }
+    });
+
+    function lineOpts(yLabel) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 600 },
+            plugins: {
+                legend: {
+                    position: "top",
+                    labels: { usePointStyle: true, pointStyle: "circle" }
+                }
+            },
+            elements: { point: { radius: 0 }, line: { borderWidth: 1.5 } },
+            scales: {
+                x: {
+                    type: "linear",
+                    title: { display: true, text: "Distance (m)" },
+                    ticks: { maxTicksLimit: 10 }
+                },
+                y: {
+                    title: { display: true, text: yLabel },
+                    grid: { color: "rgba(255,255,255,0.03)" }
+                }
+            }
+        };
+    }
+
+    function xyData(dist, values) {
+        return dist.map(function (d, i) { return { x: d, y: values[i] }; });
+    }
+
+    charts.speed = new Chart(getEl("speedChart"), {
+        type: "line",
+        data: {
+            datasets: [
+                { label: data.d1, data: xyData(dist1, data.tel1.speed), borderColor: F1_RED, backgroundColor: "transparent" },
+                { label: data.d2, data: xyData(dist2, data.tel2.speed), borderColor: CYAN,   backgroundColor: "transparent" }
+            ]
+        },
+        options: lineOpts("Speed (km/h)")
+    });
+
+    charts.throttle = new Chart(getEl("throttleChart"), {
+        type: "line",
+        data: {
+            datasets: [
+                { label: data.d1, data: xyData(dist1, data.tel1.throttle), borderColor: F1_RED, backgroundColor: "transparent" },
+                { label: data.d2, data: xyData(dist2, data.tel2.throttle), borderColor: CYAN,   backgroundColor: "transparent" }
+            ]
+        },
+        options: lineOpts("Throttle %")
+    });
+
+    charts.brake = new Chart(getEl("brakeChart"), {
+        type: "line",
+        data: {
+            datasets: [
+                { label: data.d1, data: xyData(dist1, data.tel1.brake), borderColor: F1_RED, backgroundColor: "transparent", fill: true },
+                { label: data.d2, data: xyData(dist2, data.tel2.brake), borderColor: CYAN,   backgroundColor: "transparent", fill: true }
+            ]
+        },
+        options: lineOpts("Brake")
+    });
+}
+
 function loadPart2() {
     var d1 = getEl("selD1").value;
     var d2 = getEl("selD2").value;
+    var baseUrl = "/api/data/telemetry?d1=" + d1 + "&d2=" + d2;
 
-    showLoader();
-    fetchJSON("/api/data/telemetry?d1=" + d1 + "&d2=" + d2)
+    showLoader("Loading telemetry preview...");
+
+    // Phase 1: Fast preview (every 10th point)
+    fetchJSON(baseUrl + "&resolution=preview")
         .then(function (data) {
-            var dist1 = data.tel1.distance;
-            var dist2 = data.tel2.distance;
+            _renderTelemetryCharts(data);
+            hideLoader();
 
-            ["speed", "throttle", "brake"].forEach(function (k) {
-                if (charts[k]) { charts[k].destroy(); charts[k] = null; }
-            });
-
-            function lineOpts(yLabel) {
-                return {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: { duration: 600 },
-                    plugins: {
-                        legend: {
-                            position: "top",
-                            labels: { usePointStyle: true, pointStyle: "circle" }
-                        }
-                    },
-                    elements: { point: { radius: 0 }, line: { borderWidth: 1.5 } },
-                    scales: {
-                        x: {
-                            type: "linear",
-                            title: { display: true, text: "Distance (m)" },
-                            ticks: { maxTicksLimit: 10 }
-                        },
-                        y: {
-                            title: { display: true, text: yLabel },
-                            grid: { color: "rgba(255,255,255,0.03)" }
-                        }
-                    }
-                };
-            }
-
-            function xyData(dist, values) {
-                return dist.map(function (d, i) { return { x: d, y: values[i] }; });
-            }
-
-            charts.speed = new Chart(getEl("speedChart"), {
-                type: "line",
-                data: {
-                    datasets: [
-                        { label: data.d1, data: xyData(dist1, data.tel1.speed), borderColor: F1_RED, backgroundColor: "transparent" },
-                        { label: data.d2, data: xyData(dist2, data.tel2.speed), borderColor: CYAN,   backgroundColor: "transparent" }
-                    ]
-                },
-                options: lineOpts("Speed (km/h)")
-            });
-
-            charts.throttle = new Chart(getEl("throttleChart"), {
-                type: "line",
-                data: {
-                    datasets: [
-                        { label: data.d1, data: xyData(dist1, data.tel1.throttle), borderColor: F1_RED, backgroundColor: "transparent" },
-                        { label: data.d2, data: xyData(dist2, data.tel2.throttle), borderColor: CYAN,   backgroundColor: "transparent" }
-                    ]
-                },
-                options: lineOpts("Throttle %")
-            });
-
-            charts.brake = new Chart(getEl("brakeChart"), {
-                type: "line",
-                data: {
-                    datasets: [
-                        { label: data.d1, data: xyData(dist1, data.tel1.brake), borderColor: F1_RED, backgroundColor: "transparent", fill: true },
-                        { label: data.d2, data: xyData(dist2, data.tel2.brake), borderColor: CYAN,   backgroundColor: "transparent", fill: true }
-                    ]
-                },
-                options: lineOpts("Brake")
-            });
+            // Phase 2: Full resolution in background (silent upgrade)
+            fetch(baseUrl + "&resolution=full")
+                .then(function (res) { return res.json(); })
+                .then(function (fullData) {
+                    _renderTelemetryCharts(fullData);
+                    setCachedResponse(baseUrl + "&resolution=full", fullData);
+                })
+                .catch(function () { /* preview is good enough */ });
         })
         .catch(function (err) { console.error(err); })
         .finally(hideLoader);
@@ -313,7 +356,7 @@ getEl("btnRunBaseline").addEventListener("click", function () {
 
     btn.disabled = true;
     btn.textContent = "⏳ Training model (fetching 75 years of data)...";
-    showLoader();
+    showLoader("Training ML model — fetching race data...");
 
     fetchJSON("/api/ml/predict?event_name=" + encodeURIComponent(eventName))
         .then(function (data) {
@@ -339,7 +382,7 @@ getEl("btnRunAdvanced").addEventListener("click", function () {
     var btn = getEl("btnRunAdvanced");
     btn.disabled = true;
     btn.textContent = "⏳ Tuning hyperparameters...";
-    showLoader();
+    showLoader("Running advanced ML with hyperparameter tuning...");
 
     fetchJSON("/api/ml/predict-advanced")
         .then(function (data) {
@@ -366,7 +409,7 @@ if (getEl("btnSimulateSeason")) {
         var btn = getEl("btnSimulateSeason");
         btn.disabled = true;
         btn.textContent = "⏳ Simulating Rest of Season...";
-        showLoader();
+        showLoader("Simulating rest of season...");
 
         fetchJSON("/api/ml/simulate-season")
             .then(function (data) {
@@ -561,7 +604,7 @@ function loadSeason() {
     var btn = getEl("btnLoadSeason");
     btn.disabled = true;
     btn.textContent = "⏳ Loading...";
-    showLoader();
+    showLoader("Loading season standings...");
 
     fetchJSON("/api/season/standings?year=" + year)
         .then(function (data) {
@@ -691,7 +734,7 @@ function simulateFantasy() {
     var btn = getEl("btnSimulateFantasy");
     btn.disabled = true;
     btn.textContent = "⏳ Simulating...";
-    showLoader();
+    showLoader("Simulating fantasy race...");
 
     fetchJSON("/api/fantasy/simulate", {
         method: "POST",
@@ -933,7 +976,7 @@ function loadH2H() {
 
     btn.disabled = true;
     btn.textContent = "⏳ Comparing...";
-    showLoader();
+    showLoader("Comparing drivers head-to-head...");
 
     fetchJSON("/api/h2h/compare?year=" + year + "&d1=" + d1 + "&d2=" + d2)
         .then(function (data) {
@@ -1151,7 +1194,7 @@ function loadLapTimes() {
 
     btn.disabled = true;
     btn.textContent = "⏳ Loading lap data...";
-    showLoader();
+    showLoader("Analyzing lap time data...");
 
     fetchJSON("/api/laptimes/analysis?year=" + year + "&round=" + round)
         .then(function (data) {
@@ -1418,7 +1461,7 @@ function loadCalendar() {
 
     btn.disabled = true;
     btn.textContent = "⏳ Loading...";
-    showLoader();
+    showLoader("Loading race calendar...");
 
     fetchJSON("/api/calendar/season?year=" + year)
         .then(function (data) {

@@ -244,7 +244,7 @@ def get_event_schedule(year: int):
 
     events = []
     round_num = 0
-    for m in meetings:
+    for m in sorted(meetings, key=lambda item: item.get("date_start") or ""):
         meeting_name = m.get("meeting_name", "")
         if "test" in meeting_name.lower() or "pre-season" in meeting_name.lower():
             continue

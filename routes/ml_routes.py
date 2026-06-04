@@ -1,6 +1,5 @@
 import warnings
 
-import fastf1
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -10,7 +9,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 
 from config import BASELINE_RACE_LIMIT, ADVANCED_RACE_LIMIT, TEST_SIZE, RANDOM_STATE
-from routes.data_routes import get_session, load_sessions_concurrent, get_cached_result, save_cached_result
+from services.fastf1_service import get_session, load_sessions_concurrent, get_event_schedule
+from services.cache_service import get_cached_result, save_cached_result
 
 warnings.filterwarnings("ignore")
 
@@ -30,7 +30,7 @@ def prepare_ml_data(year, limit):
         _data_cache[cache_key] = disk_df
         return disk_df
 
-    schedule = fastf1.get_event_schedule(year)
+    schedule = get_event_schedule(year)
     completed_events = []
 
     for _, event in schedule.iterrows():
@@ -95,7 +95,7 @@ def prepare_track_specific_data(event_name):
     current_year = 2026
 
     try:
-        schedule_current = fastf1.get_event_schedule(current_year)
+        schedule_current = get_event_schedule(current_year)
         completed_current = []
         for _, event in schedule_current.iterrows():
             if event["EventFormat"] == "testing":
@@ -123,7 +123,7 @@ def prepare_track_specific_data(event_name):
     historical_years = list(range(2018, current_year))
     for year in historical_years:
         try:
-            schedule = fastf1.get_event_schedule(year)
+            schedule = get_event_schedule(year)
             target_lower = event_name.lower()
             matching_events = []
             for _, event in schedule.iterrows():
@@ -241,7 +241,14 @@ def _predict_all_drivers(df, model, le_team, le_driver, le_event, include_form=F
 @ml_bp.route("/upcoming_races")
 def upcoming_races():
     try:
-        schedule = fastf1.get_event_schedule(2026)
+        # Try OpenF1 first (instant)
+        from services.data_provider import provider
+        events = provider.get_session_list(2026, completed_only=False)
+        if events:
+            return jsonify({"races": [e["name"] for e in events]})
+
+        # Fallback: FastF1
+        schedule = get_event_schedule(2026)
         upcoming = []
         for _, event in schedule.iterrows():
             if event["EventFormat"] == "testing":
@@ -422,7 +429,7 @@ def simulate_season():
         clf = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=RANDOM_STATE, eval_metric='logloss')
         clf.fit(X_train, y_train)
 
-        schedule = fastf1.get_event_schedule(target_year)
+        schedule = get_event_schedule(target_year)
         
         current_points = {}
         driver_teams = {}

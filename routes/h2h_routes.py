@@ -1,11 +1,11 @@
 import warnings
 
-import fastf1
 import numpy as np
 import pandas as pd
 from flask import Blueprint, jsonify, request
 
-from routes.data_routes import get_session, load_sessions_concurrent, get_cached_result, save_cached_result
+from services.data_provider import provider
+from services.fastf1_service import load_sessions_concurrent
 
 warnings.filterwarnings("ignore")
 
@@ -19,7 +19,7 @@ def _get_season_results(year):
     if cache_key in _h2h_cache:
         return _h2h_cache[cache_key]
 
-    schedule = fastf1.get_event_schedule(year)
+    schedule = provider.get_event_schedule(year)
 
     # Collect round numbers for completed races
     completed_events = []
@@ -150,6 +150,27 @@ def list_drivers():
     """List all drivers for a given season."""
     year = request.args.get("year", 2024, type=int)
     try:
+        # Try OpenF1 first: get drivers from the first race session (instant)
+        from services import openf1_service
+        schedule = openf1_service.get_event_schedule(year)
+        if schedule:
+            # Find the first event with a session_key
+            for ev in schedule:
+                sk = ev.get("session_key")
+                if sk:
+                    drivers_data = openf1_service.get_drivers(sk)
+                    if drivers_data:
+                        drivers = []
+                        for d in drivers_data:
+                            drivers.append({
+                                "driver": d.get("name_acronym", "???"),
+                                "team": d.get("team_name", "Unknown"),
+                            })
+                        drivers.sort(key=lambda d: d["driver"])
+                        return jsonify({"drivers": drivers, "year": year})
+                    break
+
+        # Fallback: load full season from FastF1
         df = _get_season_results(year)
         if df.empty:
             return jsonify({"drivers": []})

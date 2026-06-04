@@ -42,6 +42,10 @@ def _get_flag(event_name, country):
     return "🏁"
 
 
+def _sort_events(events):
+    return sorted(events, key=lambda event: event.get("date") or "")
+
+
 class DataProvider:
     """Intelligently routes data requests to FastF1 or OpenF1."""
 
@@ -67,7 +71,7 @@ class DataProvider:
         try:
             events = openf1_service.get_event_schedule(year)
             if events:
-                return events
+                return _sort_events(events)
         except Exception as exc:
             print(f"[DataProvider] OpenF1 schedule failed: {exc}")
 
@@ -108,6 +112,7 @@ class DataProvider:
         try:
             events = openf1_service.get_event_schedule(year)
             if events:
+                events = _sort_events(events)
                 if completed_only:
                     now = pd.Timestamp.now()
                     events = [
@@ -141,6 +146,7 @@ class DataProvider:
         try:
             events = openf1_service.get_event_schedule(year)
             if events:
+                events = _sort_events(events)
                 result = self._build_calendar_from_openf1(year, events)
                 if result:
                     save_cached_result(cache_key, result)

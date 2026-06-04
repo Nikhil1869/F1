@@ -1,8 +1,9 @@
 import warnings
-import fastf1
 import pandas as pd
 from flask import Blueprint, jsonify, request
-from routes.data_routes import get_session, load_sessions_concurrent, get_cached_result, save_cached_result
+from services.data_provider import provider
+from services.fastf1_service import load_sessions_concurrent
+from services.cache_service import get_cached_result, save_cached_result
 
 warnings.filterwarnings("ignore")
 
@@ -28,7 +29,7 @@ def standings():
 
     # 3. Compute from scratch — with concurrent loading
     try:
-        schedule = fastf1.get_event_schedule(year)
+        schedule = provider.get_event_schedule(year)
         completed = [
             e for _, e in schedule.iterrows()
             if e["EventFormat"] != "testing" and e["EventDate"] < pd.Timestamp.now()

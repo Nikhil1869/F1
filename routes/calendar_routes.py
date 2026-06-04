@@ -1,32 +1,18 @@
 import warnings
 from datetime import datetime
 
-import fastf1
 import pandas as pd
 from flask import Blueprint, jsonify, request
 
-from routes.data_routes import get_session, load_sessions_concurrent, get_cached_result, save_cached_result
+from services.data_provider import provider, _get_flag
+from services.fastf1_service import load_sessions_concurrent
+from services.cache_service import get_cached_result, save_cached_result
 
 warnings.filterwarnings("ignore")
 
 calendar_bp = Blueprint("calendar", __name__, url_prefix="/api/calendar")
 
 _calendar_cache = {}
-
-# Country to flag emoji mapping
-COUNTRY_FLAGS = {
-    "Bahrain": "🇧🇭", "Saudi Arabia": "🇸🇦", "Australia": "🇦🇺",
-    "Japan": "🇯🇵", "China": "🇨🇳", "United States": "🇺🇸",
-    "Italy": "🇮🇹", "Monaco": "🇲🇨", "Canada": "🇨🇦",
-    "Spain": "🇪🇸", "Austria": "🇦🇹", "Great Britain": "🇬🇧",
-    "United Kingdom": "🇬🇧", "Hungary": "🇭🇺", "Belgium": "🇧🇪",
-    "Netherlands": "🇳🇱", "Singapore": "🇸🇬", "Mexico": "🇲🇽",
-    "Brazil": "🇧🇷", "United Arab Emirates": "🇦🇪",
-    "Abu Dhabi": "🇦🇪", "Qatar": "🇶🇦", "Azerbaijan": "🇦🇿",
-    "France": "🇫🇷", "Portugal": "🇵🇹", "Turkey": "🇹🇷",
-    "Russia": "🇷🇺", "Germany": "🇩🇪", "USA": "🇺🇸",
-    "Miami": "🇺🇸", "Las Vegas": "🇺🇸", "Emilia Romagna": "🇮🇹",
-}
 
 
 @calendar_bp.route("/season")
@@ -46,12 +32,21 @@ def season_calendar():
         _calendar_cache[cache_key] = disk
         return jsonify(disk)
 
-    # 3. Compute from scratch
+    # 3. Try OpenF1 via DataProvider (fast — no FastF1 session loading)
     try:
-        schedule = fastf1.get_event_schedule(year)
+        openf1_result = provider.get_calendar_data(year)
+        if openf1_result:
+            _calendar_cache[cache_key] = openf1_result
+            save_cached_result(cache_key, openf1_result)
+            return jsonify(openf1_result)
+    except Exception as exc:
+        print(f"[Calendar] OpenF1 path failed: {exc}")
+
+    # 4. Fallback: compute from FastF1 (slower — loads sessions)
+    try:
+        schedule = provider.get_event_schedule(year)
         now = pd.Timestamp.now()
 
-        # Separate completed and upcoming events
         all_events = []
         completed_rounds = []
         for _, event in schedule.iterrows():
@@ -89,7 +84,6 @@ def season_calendar():
             }
 
             if event_date is not None and event_date < now:
-                # Completed race — use pre-loaded session
                 race_entry["status"] = "completed"
                 session = sessions.get(round_num)
                 if session is not None:
@@ -113,7 +107,6 @@ def season_calendar():
                 else:
                     race_entry["winner"] = "N/A"
             else:
-                # Upcoming race — check if it's the next one
                 if next_race is None:
                     race_entry["status"] = "next"
                     try:
@@ -156,19 +149,3 @@ def season_calendar():
 
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
-
-
-def _get_flag(event_name, country):
-    """Get flag emoji from event name or country."""
-    # Try country first
-    if country in COUNTRY_FLAGS:
-        return COUNTRY_FLAGS[country]
-
-    # Try matching keywords in event name
-    name_lower = event_name.lower()
-    for key, flag in COUNTRY_FLAGS.items():
-        if key.lower() in name_lower:
-            return flag
-
-    return "🏁"
-

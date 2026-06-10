@@ -37,5 +37,8 @@ export const NAV_ITEMS = [
   { href: '/engineer', label: 'AI Engineer', icon: '💬' },
   { href: '/season', label: 'Season', icon: '🏆' },
   { href: '/fantasy', label: 'Fantasy F1', icon: '🎮' },
+  { href: '/h2h', label: 'Head to Head', icon: '⚔️' },
+  { href: '/laptimes', label: 'Lap Times', icon: '⏱️' },
+  { href: '/calendar', label: 'Calendar', icon: '📅' },
   { href: '/replay', label: 'Race Replay', icon: '🏁' },
 ];

@@ -61,3 +61,14 @@ export const register = (username, password) =>
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+
+// H2H APIs
+export const getH2HDrivers = (year) => fetchJSON(`/api/h2h/drivers?year=${year}`);
+export const compareH2H = (year, d1, d2) => fetchJSON(`/api/h2h/compare?year=${year}&d1=${d1}&d2=${d2}`);
+
+// Laptimes APIs
+export const getLaptimeRaces = (year) => fetchJSON(`/api/laptimes/races?year=${year}`);
+export const analyzeLaptimes = (year, eventName) => fetchJSON(`/api/laptimes/analyze?year=${year}&event=${encodeURIComponent(eventName)}`);
+
+// Calendar API
+export const getCalendar = (year) => fetchJSON(`/api/calendar/schedule?year=${year}`);

@@ -23,7 +23,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${outfit.variable} ${titillium.variable}`}>
+    <html lang="en" className={`${outfit.variable} ${titillium.variable}`} data-scroll-behavior="smooth">
       <body className="antialiased">
         <Navbar />
         <main className="pt-16">{children}</main>

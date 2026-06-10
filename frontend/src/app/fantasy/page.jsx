@@ -87,8 +87,8 @@ export default function FantasyPage() {
             {/* Grid Position */}
             <GlassCard accent>
               <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Your Team — Predicted Position</h3>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-[200px] min-h-[100px] h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <BarChart data={results.userTeam}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="driver" tick={{ fill: '#9a9ab0', fontSize: 11 }} />
@@ -105,8 +105,8 @@ export default function FantasyPage() {
             {/* Score Doughnut */}
             <GlassCard accent>
               <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Score Breakdown</h3>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-[200px] min-h-[100px] h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <PieChart>
                     <Pie data={[{ name: 'Your Score', value: results.userScore }, { name: 'Gap', value: Math.max(0, results.bestScore - results.userScore) }]}
                       dataKey="value" cx="50%" cy="50%" innerRadius={60} outerRadius={100}>
@@ -122,8 +122,8 @@ export default function FantasyPage() {
           {/* Podium Probability */}
           <GlassCard accent className="mb-4">
             <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Top 10 — Podium Probability</h3>
-            <div className="h-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-[200px] min-h-[100px] h-[360px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <BarChart data={(results.fullGrid || []).map((d) => ({ ...d, prob: +(d.podiumProb * 100).toFixed(1) }))} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                   <XAxis type="number" domain={[0, 100]} tick={{ fill: '#9a9ab0', fontSize: 10 }} />

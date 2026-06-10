@@ -92,8 +92,8 @@ export default function TelemetryPage() {
           {/* Speed Chart */}
           <GlassCard accent className="mb-4">
             <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Speed Trace (km/h)</h3>
-            <div className="h-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-[200px] min-h-[100px] h-[360px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <LineChart data={buildChartData('speed')}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                   <XAxis dataKey="dist" tick={{ fill: '#9a9ab0', fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(1)}km`} />
@@ -111,8 +111,8 @@ export default function TelemetryPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <GlassCard accent>
               <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Throttle %</h3>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-[200px] min-h-[100px] h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <LineChart data={buildChartData('throttle')}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="dist" tick={{ fill: '#9a9ab0', fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(1)}km`} />
@@ -127,8 +127,8 @@ export default function TelemetryPage() {
 
             <GlassCard accent>
               <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Brake Input</h3>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-[200px] min-h-[100px] h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <LineChart data={buildChartData('brake')}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="dist" tick={{ fill: '#9a9ab0', fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(1)}km`} />

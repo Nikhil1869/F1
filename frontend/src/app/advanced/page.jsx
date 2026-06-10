@@ -63,8 +63,8 @@ export default function AdvancedPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <GlassCard accent>
               <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Feature Importances</h3>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-[200px] min-h-[100px] h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <PieChart><Pie data={featureData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100}>
                     {featureData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                   </Pie><Tooltip /><Legend iconType="circle" /></PieChart>

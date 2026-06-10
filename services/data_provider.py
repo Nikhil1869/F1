@@ -1,5 +1,5 @@
 """
-Unified data provider — routes data requests to FastF1 or OpenF1.
+Unified data provider — route    data requests to FastF1 or OpenF1.
 
 Strategy:
     - Schedule / Calendar  → OpenF1 first (fast HTTP), FastF1 fallback

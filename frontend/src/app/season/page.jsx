@@ -70,8 +70,8 @@ export default function SeasonPage() {
 
           <GlassCard accent className="mb-4">
             <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Driver Championship Progression</h3>
-            <div className="h-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-[200px] min-h-[100px] h-[360px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <LineChart data={driverChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                   <XAxis dataKey="round" tick={{ fill: '#9a9ab0', fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
@@ -88,8 +88,8 @@ export default function SeasonPage() {
 
           <GlassCard accent>
             <h3 className="text-xs font-bold text-[#9a9ab0] uppercase tracking-[1.5px] mb-4">Constructor Championship Progression</h3>
-            <div className="h-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="w-full min-w-[200px] min-h-[100px] h-[360px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <LineChart data={teamChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                   <XAxis dataKey="round" tick={{ fill: '#9a9ab0', fontSize: 10 }} angle={-45} textAnchor="end" height={60} />

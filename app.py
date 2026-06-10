@@ -1,8 +1,7 @@
 import os
 import threading
 import logging
-from flask import Flask, render_template, redirect, url_for
-from flask_login import login_required
+from flask import Flask
 from config import Config, CACHE_DIR
 
 # ── Centralised FastF1 cache — must happen before any route imports ──────
@@ -70,32 +69,17 @@ def _prewarm():
         print("[Pre-warm] Done — Replay data is now cached.")
     except Exception as e:
         print(f"[Pre-warm] Failed (non-fatal): {e}")
+        print("[Pre-warm] Done — Replay data is now cached.")
+    except Exception as e:
+        print(f"[Pre-warm] Failed (non-fatal): {e}")
 
 _prewarm_thread = threading.Thread(target=_prewarm, daemon=True)
 _prewarm_thread.start()
 
 
 
-@app.route("/")
-@login_required
-def index():
-    return render_template("index.html")
-
-
-@app.route("/replay")
-@login_required
-def replay():
-    return render_template("replay.html")
-
-
-@app.route("/login")
-def login_page():
-    return render_template("login.html")
-
-
-@app.route("/register")
-def register_page():
-    return render_template("login.html", register=True)
+# Frontend is now handled by Next.js
+# API routes remain mounted via blueprints
 
 
 if __name__ == "__main__":

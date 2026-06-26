@@ -1,4 +1,4 @@
-# F1 Data Lab 🏎️
+# F1 Data Lab 
 
 A modern Formula 1 analytics platform featuring real-time race data, telemetry replay, driver comparisons, ML predictions, and fantasy league tools — powered by a Flask API backend and a Next.js frontend.
 
@@ -25,55 +25,6 @@ A modern Formula 1 analytics platform featuring real-time race data, telemetry r
 - **ML**: scikit-learn, XGBoost
 - **Frontend**: Next.js 16, React 19, Recharts, Framer Motion, Tailwind CSS 4
 - **Deployment**: Docker, Render / Railway ready
-
-## Project Layout
-
-```text
-├── app.py                 # Flask application entry point
-├── config.py              # Configuration & environment variables
-├── models.py              # SQLAlchemy models (User, SeasonResult, SavedReplay)
-├── backfill.py            # Script to backfill season results into DB
-├── requirements.txt       # Python dependencies
-├── Dockerfile             # Container build
-├── docker-compose.yml     # Local Docker orchestration
-├── Procfile               # Heroku / Railway process file
-├── render.yaml            # Render deployment config
-│
-├── routes/                # Flask API route blueprints
-│   ├── data_routes.py     #   Core data endpoints
-│   ├── ml_routes.py       #   ML prediction endpoints
-│   ├── replay_routes.py   #   Race replay endpoints
-│   ├── calendar_routes.py #   Season calendar
-│   ├── race_routes.py     #   Race overview / comparison / analysis
-│   ├── h2h_routes.py      #   Head-to-head comparison
-│   ├── laptimes_routes.py #   Lap time analysis
-│   ├── strategy_routes.py #   Pit strategy
-│   ├── radar_routes.py    #   Radar chart data
-│   ├── season_routes.py   #   Season standings
-│   ├── fantasy_routes.py  #   Fantasy league
-│   ├── chat_routes.py     #   AI chat
-│   ├── auth_routes.py     #   Authentication
-│   └── async_routes.py    #   Async session loading
-│
-├── services/              # Business logic & external API clients
-│   ├── fastf1_service.py  #   FastF1 wrapper with caching & async loading
-│   ├── openf1_service.py  #   OpenF1 REST client
-│   ├── data_provider.py   #   Unified data layer (auto-selects source)
-│   └── cache_service.py   #   In-memory & disk cache utilities
-│
-├── ml_models/             # Machine learning models
-│   └── tyre_model.py      #   Tyre degradation prediction
-│
-├── frontend/              # Next.js frontend application
-│   ├── src/app/           #   App Router pages
-│   ├── src/components/    #   Reusable UI components
-│   ├── src/hooks/         #   Custom React hooks
-│   ├── src/lib/           #   API client & constants
-│   └── package.json       #   Node dependencies
-│
-├── fastf1_cache/          # FastF1 disk cache (gitignored, auto-created)
-└── precomputed/           # Pre-computed race data (gitignored, auto-created)
-```
 
 ## Quick Start
 

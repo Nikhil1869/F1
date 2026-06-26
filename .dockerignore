@@ -1,0 +1,16 @@
+.git
+.env
+.venv
+venv
+__pycache__
+*.pyc
+*.db
+*.sqlite
+fastf1_cache
+precomputed
+cache
+output
+tmp_f1_replay
+frontend/node_modules
+frontend/.next
+frontend/out
